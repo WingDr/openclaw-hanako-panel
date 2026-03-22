@@ -1,54 +1,246 @@
-import React, { useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
+import { fetchAgents, fetchBootstrap, fetchSessions, formatRelativeTime, mapProxySession } from '../api/client'
+import { panelRealtime } from '../realtime/ws'
 import { useChatStore } from '../store'
 import type { Message } from '../store'
 
-// Simple three-column chat layout within shell: Agents (left), Workspace (center), Sessions (right)
+type CreatedSession = {
+  sessionKey: string
+  agentId: string
+  preview?: string
+  updatedAt?: string
+  status?: 'pending' | 'opened' | 'closed'
+}
+
+const statusColor: Record<string, string> = {
+  online: '#4ade80',
+  idle: '#fbbf24',
+  offline: '#888',
+  pending: '#fbbf24',
+  opened: '#60a5fa',
+  closed: '#a1a1aa',
+}
+
 export default function ChatPage() {
+  const agents = useChatStore((state) => state.agents)
+  const currentAgentId = useChatStore((state) => state.currentAgentId)
   const currentSessionId = useChatStore((state) => state.currentSessionId)
   const sessions = useChatStore((state) => state.sessions)
   const messagesBySession = useChatStore((state) => state.messagesBySession)
+  const setAgents = useChatStore((state) => state.setAgents)
+  const setCurrentAgentId = useChatStore((state) => state.setCurrentAgentId)
+  const setSessions = useChatStore((state) => state.setSessions)
+  const upsertSession = useChatStore((state) => state.upsertSession)
   const addUserMessage = useChatStore((state) => state.addUserMessage)
-  const addAgentMessage = useChatStore((state) => state.addAgentMessage)
   const setSessionId = useChatStore((state) => state.setSessionId)
   const [text, setText] = useState('')
+  const [loadingAgents, setLoadingAgents] = useState(true)
+  const [loadingSessions, setLoadingSessions] = useState(false)
+  const [createPending, setCreatePending] = useState(false)
+  const [sendPending, setSendPending] = useState(false)
+  const [pageError, setPageError] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const [lastAck, setLastAck] = useState<string | null>(null)
+  const currentAgent = useMemo(
+    () => agents.find((agent) => agent.id === currentAgentId),
+    [agents, currentAgentId],
+  )
+  const currentSession = useMemo(
+    () => sessions.find((session) => session.id === currentSessionId),
+    [currentSessionId, sessions],
+  )
   const currentMessages: Message[] = messagesBySession[currentSessionId] ?? []
 
-  const onSend = () => {
-    if (!text.trim()) return
-    addUserMessage(currentSessionId, text.trim())
+  useEffect(() => {
+    let cancelled = false
+
+    const loadAgents = async () => {
+      setLoadingAgents(true)
+      setPageError(null)
+
+      try {
+        const [bootstrap, agents] = await Promise.all([fetchBootstrap(), fetchAgents()])
+        if (cancelled) {
+          return
+        }
+
+        setAgents(agents, bootstrap.defaultAgentId)
+      } catch (error) {
+        if (!cancelled) {
+          setPageError(error instanceof Error ? error.message : 'Failed to load agents')
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingAgents(false)
+        }
+      }
+    }
+
+    void loadAgents()
+
+    return () => {
+      cancelled = true
+    }
+  }, [setAgents])
+
+  useEffect(() => {
+    if (!currentAgentId) {
+      return
+    }
+
+    let cancelled = false
+
+    const loadSessions = async () => {
+      setLoadingSessions(true)
+      setPageError(null)
+      setSessions([])
+
+      try {
+        const nextSessions = await fetchSessions(currentAgentId)
+        if (!cancelled) {
+          setSessions(nextSessions)
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setPageError(error instanceof Error ? error.message : 'Failed to load sessions')
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingSessions(false)
+        }
+      }
+    }
+
+    void loadSessions()
+
+    return () => {
+      cancelled = true
+    }
+  }, [currentAgentId, setSessions])
+
+  const onSend = async () => {
+    const trimmed = text.trim()
+    if (!trimmed || !currentSessionId) {
+      return
+    }
+
     setText('')
-    // simple mock agent reply
-    setTimeout(() => {
-      addAgentMessage(currentSessionId, 'Agent: I see. Tell me more about your goal.')
-    }, 600)
+    setActionError(null)
+    addUserMessage(currentSessionId, trimmed)
+    setSendPending(true)
+
+    try {
+      await panelRealtime.sendCommand('chat.send', {
+        agentId: currentAgent?.id || currentAgentId,
+        sessionKey: currentSessionId,
+        text: trimmed,
+      })
+      setLastAck('Message accepted by panel-proxy')
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Failed to send message')
+    } finally {
+      setSendPending(false)
+    }
+  }
+
+  const onCreateSession = async () => {
+    if (!currentAgentId) {
+      return
+    }
+
+    const slug = `panel-${Date.now().toString(36)}`
+    setCreatePending(true)
+    setActionError(null)
+
+    try {
+      const response = await panelRealtime.sendCommand<{ accepted?: boolean; session?: CreatedSession }>('session.create', {
+        agentId: currentAgentId,
+        slug,
+      })
+      const created = response.result?.session
+      if (created) {
+        upsertSession(mapProxySession(created))
+        setLastAck(`Created session ${created.sessionKey}`)
+      }
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Failed to create session')
+    } finally {
+      setCreatePending(false)
+    }
+  }
+
+  const onSelectSession = (sessionId: string) => {
+    setSessionId(sessionId)
+    setActionError(null)
+    void panelRealtime.sendCommand('session.open', { sessionKey: sessionId }).catch((error) => {
+      setActionError(error instanceof Error ? error.message : 'Failed to open session')
+    })
   }
 
   return (
     <div className="pw-chat-layout" style={{ display: 'grid', gridTemplateColumns: '260px 1fr 320px', gap: '16px', height: '100%', paddingRight: 8 }}>
-      {/* Left: Agents */}
       <section className="pw-panel pw-agent-panel" aria-label="Agents list" style={{ background: 'var(--surface)', borderRadius: '8px', padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
         <div className="pw-panel-title">Agents</div>
-        {[
-          { id: 'a1', name: 'Astra', status: 'online' },
-          { id: 'a2', name: 'Orion', status: 'online' },
-          { id: 'a3', name: 'Nova', status: 'offline' }
-        ].map((ag) => (
-          <div key={ag.id} className="pw-agent-item" style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 8px', borderRadius: 6, background: ag.status === 'online' ? 'rgba(0, 128, 0, 0.15)' : 'transparent' }}>
-            <span style={{ fontFamily: 'system-ui, sans-serif' }}>{ag.name}</span>
-            <span style={{ color: ag.status === 'online' ? '#4ade80' : '#888' }}>{ag.status}</span>
-          </div>
+        {loadingAgents && <div className="pw-empty" style={{ color: '#888', padding: 8 }}>Loading agents...</div>}
+        {!loadingAgents && agents.length === 0 && (
+          <div className="pw-empty" style={{ color: '#888', padding: 8 }}>No agents returned by panel-proxy.</div>
+        )}
+        {agents.map((agent) => (
+          <button
+            key={agent.id}
+            className="pw-agent-item"
+            onClick={() => setCurrentAgentId(agent.id)}
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 4,
+              padding: '8px 10px',
+              borderRadius: 6,
+              border: '1px solid transparent',
+              background: agent.id === currentAgentId ? 'rgba(124, 58, 237, 0.18)' : 'rgba(255,255,255,0.02)',
+              color: 'inherit',
+              cursor: 'pointer',
+              textAlign: 'left',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+              <span style={{ fontFamily: 'system-ui, sans-serif' }}>{agent.name}</span>
+              <span style={{ color: statusColor[agent.status] }}>{agent.status}</span>
+            </div>
+            <div style={{ color: '#93a1c6', fontSize: 12 }}>
+              {agent.capabilities.join(' / ') || 'No capabilities'}
+            </div>
+          </button>
         ))}
       </section>
 
-      {/* Center: Workspace */}
-        <section className="pw-workspace" aria-label="Chat workspace" style={{ background: 'var(--surface)', borderRadius: '8px', padding: 12, display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <section className="pw-workspace" aria-label="Chat workspace" style={{ background: 'var(--surface)', borderRadius: '8px', padding: 12, display: 'flex', flexDirection: 'column', height: '100%' }}>
         <div className="pw-workspace-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-          <strong>Session: {currentSessionId}</strong>
-          <span className="pw-muted" style={{ color: '#a5a8c7' }}>Live</span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <strong>{currentSession?.name || 'No session selected'}</strong>
+            <span className="pw-muted" style={{ color: '#a5a8c7', fontSize: 12 }}>
+              {currentSessionId || 'Select or create a session to start chatting'}
+            </span>
+          </div>
+          <span className="pw-muted" style={{ color: '#a5a8c7' }}>
+            {sendPending ? 'Sending...' : 'Live'}
+          </span>
         </div>
+        {(pageError || actionError || lastAck) && (
+          <div style={{ marginBottom: 8, padding: '8px 10px', borderRadius: 8, background: 'rgba(255,255,255,0.04)', color: pageError || actionError ? '#fca5a5' : '#93c5fd' }}>
+            {pageError || actionError || lastAck}
+          </div>
+        )}
         <div className="pw-messages" style={{ flex: 1, overflow: 'auto', padding: '6px 0' }}>
-          {currentMessages.length === 0 && (
-            <div className="pw-empty" style={{ color: '#888', padding: 8 }}>No messages yet. Start the conversation.</div>
+          {!currentSessionId && (
+            <div className="pw-empty" style={{ color: '#888', padding: 8 }}>
+              No session available for the selected agent yet.
+            </div>
+          )}
+          {currentSessionId && currentMessages.length === 0 && (
+            <div className="pw-empty" style={{ color: '#888', padding: 8 }}>
+              This session is connected to panel-proxy. Messages sent from this page are real, but transcript history is still kept locally until the proxy exposes message read APIs.
+            </div>
           )}
           {currentMessages.map((m: Message) => (
             <div key={m.id} className="pw-message" style={{ display: 'flex', margin: '6px 0', justifyContent: m.author === 'agent' ? 'flex-start' : 'flex-end' }}>
@@ -63,23 +255,65 @@ export default function ChatPage() {
           <input
             value={text}
             onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                void onSend()
+              }
+            }}
             placeholder="Type a message..."
+            disabled={!currentSessionId || sendPending}
             style={{ flex: 1, padding: '10px 12px', borderRadius: 8, border: '1px solid var(--border)', background: '#0e1220', color: 'white' }}
           />
-          <button onClick={onSend} style={{ padding: '10px 14px', borderRadius: 8, background: 'var(--primary)', color: 'white', border: 'none' }}>Send</button>
+          <button
+            onClick={() => void onSend()}
+            disabled={!currentSessionId || sendPending}
+            style={{ padding: '10px 14px', borderRadius: 8, background: 'var(--primary)', color: 'white', border: 'none', opacity: !currentSessionId || sendPending ? 0.6 : 1 }}
+          >
+            Send
+          </button>
         </div>
       </section>
 
-      {/* Right: Sessions quick list (mock) */}
       <section className="pw-panel pw-chair-panel" aria-label="Sessions" style={{ background: 'var(--surface)', borderRadius: 8, padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <div className="pw-panel-title">Sessions</div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
+          <div className="pw-panel-title" style={{ marginBottom: 0 }}>Sessions</div>
+          <button
+            onClick={() => void onCreateSession()}
+            disabled={!currentAgentId || createPending}
+            style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'rgba(255,255,255,0.03)', color: 'white', opacity: !currentAgentId || createPending ? 0.6 : 1 }}
+          >
+            {createPending ? 'Creating...' : 'New'}
+          </button>
+        </div>
+        {loadingSessions && <div className="pw-empty" style={{ color: '#888', padding: 8 }}>Loading sessions...</div>}
+        {!loadingSessions && sessions.length === 0 && currentAgentId && (
+          <div className="pw-empty" style={{ color: '#888', padding: 8 }}>No sessions for this agent yet.</div>
+        )}
         {sessions.map((session) => (
-          <div key={session.id} className="pw-session-item" onClick={() => setSessionId(session.id)} style={{ padding: '6px 8px', borderRadius: 6, cursor: 'pointer', background: session.id === currentSessionId ? 'rgba(124, 58, 237, 0.18)' : 'transparent' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+          <button
+            key={session.id}
+            className="pw-session-item"
+            onClick={() => onSelectSession(session.id)}
+            style={{
+              padding: '8px 10px',
+              borderRadius: 6,
+              cursor: 'pointer',
+              border: '1px solid transparent',
+              background: session.id === currentSessionId ? 'rgba(124, 58, 237, 0.18)' : 'rgba(255,255,255,0.02)',
+              color: 'inherit',
+              textAlign: 'left',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
               <span>{session.name}</span>
-              <span style={{ color: '#9aa3ff', fontSize: 12 }}>{session.updated ?? ''}</span>
+              <span style={{ color: '#9aa3ff', fontSize: 12 }}>{session.updated ?? formatRelativeTime(session.updatedAt) ?? ''}</span>
             </div>
-          </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 4 }}>
+              <span style={{ color: '#7dd3fc', fontSize: 12 }}>{session.agentId}</span>
+              <span style={{ color: statusColor[session.status || 'pending'], fontSize: 12 }}>{session.status || 'pending'}</span>
+            </div>
+          </button>
         ))}
       </section>
     </div>

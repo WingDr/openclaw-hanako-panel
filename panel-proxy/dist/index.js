@@ -56,6 +56,17 @@ const decodeWsMessage = (raw) => {
 async function main() {
     const app = (0, fastify_1.default)({ logger: false });
     await app.register(websocket_1.default);
+    app.addHook('onRequest', async (request, reply) => {
+        const origin = typeof request.headers.origin === 'string' ? request.headers.origin : '*';
+        reply.header('Access-Control-Allow-Origin', origin);
+        reply.header('Vary', 'Origin');
+        reply.header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+        reply.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+        if (request.method === 'OPTIONS') {
+            reply.code(204);
+            return reply.send();
+        }
+    });
     app.get('/api/bootstrap', async () => {
         const data = await (0, gatewayClient_1.bootstrap)();
         const response = { ok: true, data };

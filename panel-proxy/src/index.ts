@@ -69,6 +69,19 @@ async function main() {
   const app = Fastify({ logger: false })
   await app.register(fastifyWebsocket)
 
+  app.addHook('onRequest', async (request, reply) => {
+    const origin = typeof request.headers.origin === 'string' ? request.headers.origin : '*'
+    reply.header('Access-Control-Allow-Origin', origin)
+    reply.header('Vary', 'Origin')
+    reply.header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
+    reply.header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+
+    if (request.method === 'OPTIONS') {
+      reply.code(204)
+      return reply.send()
+    }
+  })
+
   app.get('/api/bootstrap', async () => {
     const data = await bootstrap()
     const response: HttpOk<typeof data> = { ok: true, data }

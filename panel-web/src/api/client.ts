@@ -1,23 +1,92 @@
-// API client stubs and mock data hooks
 import { createPanelApiUrl, panelApiBaseUrl } from '../config'
 
-export type ChatSession = { id: string; name: string; updated?: string }
-export type Message = { id: string; sessionId: string; author: 'agent'|'user'; text: string; timestamp: string }
-export type LogEntry = { id: string; time: string; level: 'info'|'warning'|'error'; message: string }
+export type AgentStatus = 'online' | 'idle' | 'offline'
+export type SessionStatus = 'pending' | 'opened' | 'closed'
+export type ChannelStatus = 'connected' | 'disconnected'
+export type LogLevel = 'info' | 'warning' | 'error'
+
+export type AgentSummary = {
+  id: string
+  name: string
+  status: AgentStatus
+  capabilities: string[]
+}
+
+export type ChatSession = {
+  id: string
+  agentId: string
+  name: string
+  updatedAt?: string
+  updated?: string
+  status?: SessionStatus
+}
+
+export type Message = {
+  id: string
+  sessionId: string
+  author: 'agent' | 'user'
+  text: string
+  timestamp: string
+}
+
+export type LogEntry = {
+  id: string
+  time: string
+  timestamp: string
+  level: LogLevel
+  message: string
+}
+
+export type BootstrapData = {
+  proxyVersion: string
+  gateway: {
+    connected: boolean
+    mode: 'proxy'
+  }
+  defaultAgentId: string
+  features: {
+    chat: boolean
+    logs: boolean
+    status: boolean
+  }
+}
+
+export type StatusSnapshot = {
+  gateway: {
+    connected: boolean
+    lastUpdatedAt: string
+  }
+  agents: AgentSummary[]
+  channels: Array<{
+    channelKey: string
+    status: ChannelStatus
+    summary: string
+  }>
+  recentSessions: ChatSession[]
+}
 
 type HttpOk<T> = { ok: true; data: T }
 type HttpError = { ok: false; error: { code: string; message: string } }
 type HttpResponse<T> = HttpOk<T> | HttpError
 
+type ProxyAgent = {
+  agentId: string
+  label: string
+  status: AgentStatus
+  capabilities: string[]
+}
+
 type ProxySession = {
   sessionKey: string
+  agentId: string
   preview?: string
   updatedAt?: string
+  status?: SessionStatus
 }
 
 type ProxyLogLine = {
   ts: string
-  level: 'info'|'warning'|'error'
+  level: 'info' | 'warn' | 'error'
   text: string
 }
 
@@ -25,16 +94,6 @@ type ProxyLogsSnapshot = {
   cursor: number
   lines: ProxyLogLine[]
 }
-
-const fallbackSessions: ChatSession[] = [
-  { id: 'sess1', name: 'Session 1' },
-  { id: 'sess2', name: 'Session 2' },
-]
-
-const fallbackLogs: LogEntry[] = [
-  { id: 'l1', time: '10:00', level: 'info', message: 'Initialized' },
-  { id: 'l2', time: '10:01', level: 'warning', message: 'Latency detected' },
-]
 
 async function fetchProxyData<T>(pathname: string): Promise<T> {
   const response = await fetch(createPanelApiUrl(pathname))
@@ -54,38 +113,100 @@ export function getPanelApiBaseUrl(): string {
   return panelApiBaseUrl
 }
 
-export async function fetchSessions(agentId: string = 'main'): Promise<ChatSession[]> {
-  try {
-    const sessions = await fetchProxyData<ProxySession[]>(`/api/agents/${encodeURIComponent(agentId)}/sessions`)
-    return sessions.map((session) => ({
-      id: session.sessionKey,
-      name: session.preview || session.sessionKey,
-      updated: session.updatedAt,
-    }))
-  } catch {
-    return fallbackSessions
+export function formatClockTime(value: string): string {
+  return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+}
+
+export function formatRelativeTime(value?: string): string | undefined {
+  if (!value) {
+    return undefined
+  }
+
+  const diffMs = new Date(value).getTime() - Date.now()
+  const diffMinutes = Math.round(diffMs / 60000)
+  const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' })
+
+  if (Math.abs(diffMinutes) < 60) {
+    return rtf.format(diffMinutes, 'minute')
+  }
+
+  const diffHours = Math.round(diffMinutes / 60)
+  if (Math.abs(diffHours) < 24) {
+    return rtf.format(diffHours, 'hour')
+  }
+
+  const diffDays = Math.round(diffHours / 24)
+  return rtf.format(diffDays, 'day')
+}
+
+export function mapProxyAgent(agent: ProxyAgent): AgentSummary {
+  return {
+    id: agent.agentId,
+    name: agent.label,
+    status: agent.status,
+    capabilities: agent.capabilities,
   }
 }
 
-export async function fetchMessages(sessionId: string): Promise<Message[]> {
-  const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-  return [ { id: 'm1', sessionId, author: 'agent', text: 'Hello from API mock', timestamp: now } ]
+export function mapProxySession(session: ProxySession): ChatSession {
+  return {
+    id: session.sessionKey,
+    agentId: session.agentId,
+    name: session.preview || session.sessionKey,
+    updatedAt: session.updatedAt,
+    updated: formatRelativeTime(session.updatedAt),
+    status: session.status,
+  }
 }
 
-export async function sendMessage(sessionId: string, text: string): Promise<Message> {
-  return { id: 'm_auto', sessionId, author: 'user', text, timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }
+export function mapProxyLogLine(line: ProxyLogLine, index: number): LogEntry {
+  return {
+    id: `log-${index}-${line.ts}`,
+    time: formatClockTime(line.ts),
+    timestamp: line.ts,
+    level: line.level === 'warn' ? 'warning' : line.level,
+    message: line.text,
+  }
+}
+
+export async function fetchBootstrap(): Promise<BootstrapData> {
+  return fetchProxyData<BootstrapData>('/api/bootstrap')
+}
+
+export async function fetchAgents(): Promise<AgentSummary[]> {
+  const agents = await fetchProxyData<ProxyAgent[]>('/api/agents')
+  return agents.map(mapProxyAgent)
+}
+
+export async function fetchSessions(agentId: string = 'main'): Promise<ChatSession[]> {
+  const sessions = await fetchProxyData<ProxySession[]>(`/api/agents/${encodeURIComponent(agentId)}/sessions`)
+  return sessions.map(mapProxySession)
 }
 
 export async function fetchLogs(): Promise<LogEntry[]> {
-  try {
-    const snapshot = await fetchProxyData<ProxyLogsSnapshot>('/api/logs/snapshot')
-    return snapshot.lines.map((line, index) => ({
-      id: `log-${index}-${line.ts}`,
-      time: new Date(line.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      level: line.level,
-      message: line.text,
-    }))
-  } catch {
-    return fallbackLogs
+  const snapshot = await fetchProxyData<ProxyLogsSnapshot>('/api/logs/snapshot')
+  return snapshot.lines.map(mapProxyLogLine)
+}
+
+export async function fetchStatus(): Promise<StatusSnapshot> {
+  const snapshot = await fetchProxyData<{
+    gateway: {
+      connected: boolean
+      lastUpdatedAt: string
+    }
+    agents: ProxyAgent[]
+    channels: Array<{
+      channelKey: string
+      status: ChannelStatus
+      summary: string
+    }>
+    recentSessions: ProxySession[]
+  }>('/api/status')
+
+  return {
+    gateway: snapshot.gateway,
+    agents: snapshot.agents.map(mapProxyAgent),
+    channels: snapshot.channels,
+    recentSessions: snapshot.recentSessions.map(mapProxySession),
   }
 }
