@@ -28,7 +28,7 @@
 - `agent:<agentId>:task:<slug>`
 - `agent:<agentId>:workspace:<slug>`
 
-MVP 阶段优先只做：
+首版阶段优先只做：
 
 - 分 agent chat
 - 实时 log 监控
@@ -39,7 +39,7 @@ MVP 阶段优先只做：
 如果你是第一次接手这个仓库，建议按这个顺序阅读：
 
 1. `docs/00 Index.md`
-2. `docs/08 最小可行架构 MVP 2026-03-22.md`
+2. `docs/08 最小实现架构 首版 2026-03-22.md`
 3. `docs/05 局域网 HTTP 与薄网关方案 2026-03-21.md`
 4. `docs/06 Panel Proxy 设计 2026-03-21.md`
 5. `docs/07 前端网页实现方案与参考实现 2026-03-22.md`
@@ -79,7 +79,7 @@ MVP 阶段优先只做：
 - `/chat`：工作区
 - `/manage`：管理区
 
-如果按 MVP 收缩，也可以先落成：
+如果按 首版 收缩，也可以先落成：
 
 - `/chat`
 - `/logs`

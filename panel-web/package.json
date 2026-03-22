@@ -1,0 +1,24 @@
+{
+  "name": "panel-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --port 5173"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^6.20.0",
+    "zustand": "^4.3.8"
+  },
+  "devDependencies": {
+    "vite": "^5.4.0",
+    "@vitejs/plugin-react": "^4.0.0",
+    "typescript": "^5.2.2",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.0.11"
+  }
+}
