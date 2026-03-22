@@ -22,6 +22,13 @@ export type LogLine = {
   text: string
 }
 
+export type GatewayConnectionPayload = {
+  source: 'gateway'
+  connected: boolean
+  at: string
+  message?: string
+}
+
 export type BootstrapResponse = {
   proxyVersion: string
   gateway: {
@@ -39,6 +46,15 @@ export type BootstrapResponse = {
 export type LogsSnapshot = {
   cursor: number
   lines: LogLine[]
+}
+
+export type LogsAppendPayload = {
+  cursor: number
+  lines: LogLine[]
+}
+
+export type LogsResetPayload = {
+  reason: string
 }
 
 export type StatusResponse = {
@@ -83,7 +99,7 @@ export type AckEnvelope = {
 
 export type EventEnvelope = {
   type: 'event'
-  event: 'logs.init' | 'logs.update' | 'system.connection' | 'status.snapshot'
+  event: 'logs.append' | 'logs.reset' | 'system.connection' | 'status.snapshot'
   topic?: string
   payload: unknown
 }

@@ -2,8 +2,7 @@ import Fastify from 'fastify'
 import fastifyWebsocket from '@fastify/websocket'
 import type WebSocket from 'ws'
 import { addSession, bootstrap, fetchAgents, fetchAgentSessions } from './gatewayClient'
-import { getLogsSnapshot } from './logsService'
-import { subscribeSubscriber, unsubscribeSubscriber, appendLog } from './logsService'
+import { getLogsSnapshot, getLogsStatus, getGatewayConnectionSnapshot, subscribeSubscriber, unsubscribeSubscriber } from './logsService'
 import { browserWsHub } from './browserWsHub'
 import { AckEnvelope, BrowserCommand, HttpOk, Session, StatusResponse } from './types'
 import { snapshotStatus } from './statusService'
@@ -108,13 +107,19 @@ async function main() {
       const s = await fetchAgentSessions(a.agentId)
       allSessions.push(...s)
     }
-    const data: StatusResponse = snapshotStatus(agents, allSessions)
-    const response: HttpOk<typeof data> = { ok: true, data }
+    const logsStatus = getLogsStatus()
+    const withGateway: StatusResponse = snapshotStatus(agents, allSessions, {
+      gatewayConnected: logsStatus.connected,
+      logsConnected: logsStatus.connected,
+      lastUpdatedAt: logsStatus.lastPollAt,
+      logsMessage: logsStatus.lastError || (logsStatus.connected ? 'Live tail available' : 'Logs tail unavailable'),
+    })
+    const response: HttpOk<typeof withGateway> = { ok: true, data: withGateway }
     return response
   })
 
   app.get('/api/logs/snapshot', async () => {
-    const data = getLogsSnapshot(100)
+    const data = await getLogsSnapshot(100)
     const response: HttpOk<typeof data> = { ok: true, data }
     return response
   })
@@ -122,6 +127,15 @@ async function main() {
   app.get('/ws', { websocket: true }, (socket, _request) => {
     const ws: WebSocket = socket
     browserWsHub.addClient(ws)
+    try {
+      ws.send(JSON.stringify({
+        type: 'event',
+        event: 'system.connection',
+        topic: 'gateway',
+        payload: getGatewayConnectionSnapshot(),
+      }))
+    } catch {
+    }
 
     ws.on('message', (raw) => {
       let message: BrowserCommand
@@ -153,7 +167,6 @@ function handleEnvelope(ws: WebSocket, envelope: BrowserCommand) {
           ? envelope.payload.message
           : ''
 
-      appendLog({ ts: new Date().toISOString(), level: 'info', text: `chat.send: ${text}` })
       ws.send(JSON.stringify(ack('chat.send', envelope.id, { accepted: true, echo: text })))
       break
     }
@@ -178,9 +191,14 @@ function handleEnvelope(ws: WebSocket, envelope: BrowserCommand) {
       break
     }
     case 'logs.subscribe': {
-      subscribeSubscriber(ws)
-      ws.send(JSON.stringify(ack('logs.subscribe', envelope.id, { accepted: true, topic: 'logs:gateway' })))
-      break
+      void subscribeSubscriber(ws)
+        .then(() => {
+          ws.send(JSON.stringify(ack('logs.subscribe', envelope.id, { accepted: true, topic: 'logs:gateway' })))
+        })
+        .catch((error) => {
+          ws.send(JSON.stringify(ackError('logs.subscribe', envelope.id, 'gateway_error', error instanceof Error ? error.message : 'Failed to subscribe logs')))
+        })
+      return
     }
     case 'logs.unsubscribe': {
       unsubscribeSubscriber(ws)

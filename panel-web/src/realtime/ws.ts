@@ -21,7 +21,7 @@ type AckEnvelope = {
 
 export type EventEnvelope = {
   type: 'event'
-  event: 'logs.init' | 'logs.update' | 'system.connection' | 'status.snapshot'
+  event: 'logs.append' | 'logs.reset' | 'system.connection' | 'status.snapshot'
   topic?: string
   payload: unknown
 }

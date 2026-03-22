@@ -3,15 +3,24 @@ import { fetchLogs, mapProxyLogLine } from '../api/client'
 import type { LogEntry } from '../api/client'
 import { panelRealtime } from '../realtime/ws'
 
-type RealtimeLogLine = {
-  ts: string
-  level: 'info' | 'warn' | 'error'
-  text: string
+type RealtimeLogsAppendPayload = {
+  cursor: number
+  lines: Array<{
+    ts: string
+    level: 'info' | 'warn' | 'error'
+    text: string
+  }>
 }
 
-type RealtimeLogsSnapshot = {
-  cursor: number
-  lines: RealtimeLogLine[]
+type RealtimeLogsResetPayload = {
+  reason: string
+}
+
+type SystemConnectionPayload = {
+  source: 'gateway'
+  connected: boolean
+  at: string
+  message?: string
 }
 
 export default function LogsPage() {
@@ -20,6 +29,7 @@ export default function LogsPage() {
   const [loading, setLoading] = useState(true)
   const [live, setLive] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [connectionMessage, setConnectionMessage] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -28,14 +38,24 @@ export default function LogsPage() {
         return
       }
 
-      if (event.event === 'logs.init') {
-        const payload = event.payload as RealtimeLogsSnapshot
-        setLogs(payload.lines.map(mapProxyLogLine))
+      if (event.event === 'logs.reset') {
+        const payload = event.payload as RealtimeLogsResetPayload
+        setLogs([])
+        setConnectionMessage(payload.reason === 'subscribed' ? null : `Logs reset: ${payload.reason}`)
       }
 
-      if (event.event === 'logs.update') {
-        const payload = event.payload as RealtimeLogLine
-        setLogs((current) => [...current, mapProxyLogLine(payload, current.length)])
+      if (event.event === 'logs.append') {
+        const payload = event.payload as RealtimeLogsAppendPayload
+        setLogs((current) => [
+          ...current,
+          ...payload.lines.map((line, index) => mapProxyLogLine(line, current.length + index)),
+        ])
+      }
+
+      if (event.event === 'system.connection') {
+        const payload = event.payload as SystemConnectionPayload
+        setLive(payload.connected)
+        setConnectionMessage(payload.message || null)
       }
     })
 
@@ -51,7 +71,7 @@ export default function LogsPage() {
 
         await panelRealtime.sendCommand('logs.subscribe', {})
         if (!cancelled) {
-          setLive(true)
+          setConnectionMessage(null)
         }
       } catch (nextError) {
         if (!cancelled) {
@@ -107,6 +127,9 @@ export default function LogsPage() {
       </div>
       {error && (
         <div style={{ padding: '0 8px', color: '#fca5a5' }}>{error}</div>
+      )}
+      {connectionMessage && !error && (
+        <div style={{ padding: '0 8px', color: live ? '#93c5fd' : '#fca5a5' }}>{connectionMessage}</div>
       )}
       <div className="pw-loglist" style={{ overflow: 'auto', padding: 8, display: 'grid', gap: 6 }}>
         {loading && <div style={{ color: '#888' }}>Loading logs...</div>}

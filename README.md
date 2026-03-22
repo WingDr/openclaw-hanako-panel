@@ -228,11 +228,21 @@ PANEL_PROXY_PORT=22846
 # 留空时，panel-web 会默认连接到“当前页面主机名 + PANEL_PROXY_PORT”
 VITE_PANEL_API_BASE_URL=
 VITE_PANEL_WS_URL=
+
+# panel-proxy 通过 OpenClaw Gateway `logs.tail` 拉日志
+OPENCLAW_GATEWAY_WS_URL=wss://127.0.0.1:22838
+OPENCLAW_GATEWAY_AUTH_TOKEN=
+OPENCLAW_LOGS_POLL_MS=1000
+OPENCLAW_LOGS_LIMIT=200
+OPENCLAW_LOGS_MAX_BYTES=250000
 ```
 
 如果你是从另一台设备通过局域网地址访问，例如 `http://192.168.1.20:5173`，推荐先保持 `VITE_PANEL_API_BASE_URL` 和 `VITE_PANEL_WS_URL` 为空，让前端自动连到 `192.168.1.20:22846`。
 
 只有当 `panel-web` 和 `panel-proxy` 不在同一台机器上时，才需要显式填写这两个变量。
+
+`/logs` 页的数据来源是 OpenClaw Gateway 的 `logs.tail`，不是 `panel-proxy` 自己的控制台输出。
+如果 `OPENCLAW_GATEWAY_*` 没有显式填写，`panel-proxy` 会优先尝试从同机的 `~/.openclaw/openclaw.json` 推导本地 Gateway 地址和 token。
 
 ### 3. 一条命令同时启动
 
@@ -275,6 +285,36 @@ npm run dev
 - 默认行为：留空时自动使用 `当前页面协议对应的 ws/wss + 当前页面主机名 + PANEL_PROXY_PORT + /ws`
 - 本机访问示例：`ws://localhost:22846/ws`
 - 示例：`VITE_PANEL_WS_URL=ws://192.168.1.20:22846/ws`
+
+### `OPENCLAW_GATEWAY_WS_URL`
+
+- 用途：`panel-proxy` 连接 OpenClaw Gateway 的 WebSocket 地址
+- 推荐值：`wss://127.0.0.1:22838`
+- 留空行为：会尝试从 `~/.openclaw/openclaw.json` 推导本机 Gateway 地址
+
+### `OPENCLAW_GATEWAY_AUTH_TOKEN`
+
+- 用途：`panel-proxy` 调用 Gateway RPC 时使用的 token
+- 推荐值：填写你当前 OpenClaw Gateway 的 token
+- 留空行为：如果本机 `~/.openclaw/openclaw.json` 里是 token 模式，会自动读取
+
+### `OPENCLAW_LOGS_POLL_MS`
+
+- 用途：`panel-proxy` 轮询 `logs.tail` 的间隔
+- 默认值：`1000`
+- 示例：`OPENCLAW_LOGS_POLL_MS=1500`
+
+### `OPENCLAW_LOGS_LIMIT`
+
+- 用途：每轮 `logs.tail` 请求的最大行数
+- 默认值：`200`
+- 示例：`OPENCLAW_LOGS_LIMIT=500`
+
+### `OPENCLAW_LOGS_MAX_BYTES`
+
+- 用途：每轮 `logs.tail` 请求的最大字节数
+- 默认值：`250000`
+- 示例：`OPENCLAW_LOGS_MAX_BYTES=500000`
 
 ## 单独启动子项目
 

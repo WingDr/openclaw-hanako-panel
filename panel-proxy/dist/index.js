@@ -7,7 +7,6 @@ const fastify_1 = __importDefault(require("fastify"));
 const websocket_1 = __importDefault(require("@fastify/websocket"));
 const gatewayClient_1 = require("./gatewayClient");
 const logsService_1 = require("./logsService");
-const logsService_2 = require("./logsService");
 const browserWsHub_1 = require("./browserWsHub");
 const statusService_1 = require("./statusService");
 const defaultPort = 22846;
@@ -90,18 +89,34 @@ async function main() {
             const s = await (0, gatewayClient_1.fetchAgentSessions)(a.agentId);
             allSessions.push(...s);
         }
-        const data = (0, statusService_1.snapshotStatus)(agents, allSessions);
-        const response = { ok: true, data };
+        const logsStatus = (0, logsService_1.getLogsStatus)();
+        const withGateway = (0, statusService_1.snapshotStatus)(agents, allSessions, {
+            gatewayConnected: logsStatus.connected,
+            logsConnected: logsStatus.connected,
+            lastUpdatedAt: logsStatus.lastPollAt,
+            logsMessage: logsStatus.lastError || (logsStatus.connected ? 'Live tail available' : 'Logs tail unavailable'),
+        });
+        const response = { ok: true, data: withGateway };
         return response;
     });
     app.get('/api/logs/snapshot', async () => {
-        const data = (0, logsService_1.getLogsSnapshot)(100);
+        const data = await (0, logsService_1.getLogsSnapshot)(100);
         const response = { ok: true, data };
         return response;
     });
     app.get('/ws', { websocket: true }, (socket, _request) => {
         const ws = socket;
         browserWsHub_1.browserWsHub.addClient(ws);
+        try {
+            ws.send(JSON.stringify({
+                type: 'event',
+                event: 'system.connection',
+                topic: 'gateway',
+                payload: (0, logsService_1.getGatewayConnectionSnapshot)(),
+            }));
+        }
+        catch {
+        }
         ws.on('message', (raw) => {
             let message;
             try {
@@ -114,7 +129,7 @@ async function main() {
             handleEnvelope(ws, message);
         });
         ws.on('close', () => {
-            (0, logsService_2.unsubscribeSubscriber)(ws);
+            (0, logsService_1.unsubscribeSubscriber)(ws);
             browserWsHub_1.browserWsHub.removeClient(ws);
         });
     });
@@ -129,7 +144,6 @@ function handleEnvelope(ws, envelope) {
                 : typeof envelope.payload?.message === 'string'
                     ? envelope.payload.message
                     : '';
-            (0, logsService_2.appendLog)({ ts: new Date().toISOString(), level: 'info', text: `chat.send: ${text}` });
             ws.send(JSON.stringify(ack('chat.send', envelope.id, { accepted: true, echo: text })));
             break;
         }
@@ -154,12 +168,17 @@ function handleEnvelope(ws, envelope) {
             break;
         }
         case 'logs.subscribe': {
-            (0, logsService_2.subscribeSubscriber)(ws);
-            ws.send(JSON.stringify(ack('logs.subscribe', envelope.id, { accepted: true, topic: 'logs:gateway' })));
-            break;
+            void (0, logsService_1.subscribeSubscriber)(ws)
+                .then(() => {
+                ws.send(JSON.stringify(ack('logs.subscribe', envelope.id, { accepted: true, topic: 'logs:gateway' })));
+            })
+                .catch((error) => {
+                ws.send(JSON.stringify(ackError('logs.subscribe', envelope.id, 'gateway_error', error instanceof Error ? error.message : 'Failed to subscribe logs')));
+            });
+            return;
         }
         case 'logs.unsubscribe': {
-            (0, logsService_2.unsubscribeSubscriber)(ws);
+            (0, logsService_1.unsubscribeSubscriber)(ws);
             ws.send(JSON.stringify(ack('logs.unsubscribe', envelope.id, { accepted: true })));
             break;
         }
