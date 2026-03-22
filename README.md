@@ -175,9 +175,12 @@
 
 1. `docs/00 Index.md`
 2. `docs/08 最小可行架构 MVP 2026-03-22.md`
-3. `docs/05 局域网 HTTP 与薄网关方案 2026-03-21.md`
-4. `docs/06 Panel Proxy 设计 2026-03-21.md`
-5. `docs/07 前端网页实现方案与参考实现 2026-03-22.md`
+3. `docs/09 MVP 前端页面树与组件结构 2026-03-22.md`
+4. `docs/10 Gateway WS 客户端数据流草案 2026-03-22.md`
+5. `docs/11 Panel Proxy 最小接口协议 v0.1 2026-03-22.md`
+6. `docs/05 局域网 HTTP 与薄网关方案 2026-03-21.md`
+7. `docs/06 Panel Proxy 设计 2026-03-21.md`
+8. `docs/07 前端网页实现方案与参考实现 2026-03-22.md`
 
 如果要追溯完整决策过程，再看：
 
@@ -198,8 +201,15 @@
 
 下一步最适合继续补的内容包括：
 
-- 前端页面树与组件树
-- Gateway WS 客户端数据流草案
 - 独立 session 数据模型
-- 日志页事件模型
-- panel proxy 最小接口协议
+- 日志页与 chat/tool stream 前端事件模型
+- `panel-web/` 与 `panel-proxy/` 的目录初始化方案
+- MVP schema / Zod 类型草案
+
+## 已落地的可执行设计文档
+
+- `docs/09 MVP 前端页面树与组件结构 2026-03-22.md`
+- `docs/10 Gateway WS 客户端数据流草案 2026-03-22.md`
+- `docs/11 Panel Proxy 最小接口协议 v0.1 2026-03-22.md`
+
+这三份文档已经把 MVP 前端骨架、Gateway 实时数据流和 panel proxy 最小协议整理成了可以直接进入编码阶段的草案。
