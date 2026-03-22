@@ -8,7 +8,24 @@ import { browserWsHub } from './browserWsHub'
 import { AckEnvelope, BrowserCommand, HttpOk, Session, StatusResponse } from './types'
 import { snapshotStatus } from './statusService'
 
-const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 8080
+const defaultPort = 22846
+
+const parsePort = (...candidates: Array<string | undefined>): number => {
+  for (const candidate of candidates) {
+    if (!candidate) {
+      continue
+    }
+
+    const parsed = parseInt(candidate, 10)
+    if (Number.isInteger(parsed) && parsed > 0) {
+      return parsed
+    }
+  }
+
+  return defaultPort
+}
+
+const port = parsePort(process.env.PANEL_PROXY_PORT, process.env.PORT)
 
 type AgentSessionsParams = { agentId: string }
 
@@ -27,6 +44,26 @@ const ackError = (action: BrowserCommand['cmd'], id: string | undefined, code: s
   action,
   error: { code, message },
 })
+
+const decodeWsMessage = (raw: unknown): string => {
+  if (typeof raw === 'string') {
+    return raw
+  }
+
+  if (Buffer.isBuffer(raw)) {
+    return raw.toString()
+  }
+
+  if (raw instanceof ArrayBuffer) {
+    return Buffer.from(raw).toString()
+  }
+
+  if (Array.isArray(raw)) {
+    return Buffer.concat(raw.filter(Buffer.isBuffer)).toString()
+  }
+
+  return String(raw)
+}
 
 async function main() {
   const app = Fastify({ logger: false })
@@ -69,14 +106,14 @@ async function main() {
     return response
   })
 
-  app.get('/ws', { websocket: true }, (connection) => {
-    const ws = connection.socket as WebSocket
+  app.get('/ws', { websocket: true }, (socket, _request) => {
+    const ws: WebSocket = socket
     browserWsHub.addClient(ws)
 
-    ws.on('message', (raw: Buffer) => {
+    ws.on('message', (raw) => {
       let message: BrowserCommand
       try {
-        message = JSON.parse(raw.toString()) as BrowserCommand
+        message = JSON.parse(decodeWsMessage(raw)) as BrowserCommand
       } catch {
         ws.send(JSON.stringify(ackError('chat.send', undefined, 'invalid_json', 'Invalid command envelope')))
         return

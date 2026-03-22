@@ -10,7 +10,20 @@ const logsService_1 = require("./logsService");
 const logsService_2 = require("./logsService");
 const browserWsHub_1 = require("./browserWsHub");
 const statusService_1 = require("./statusService");
-const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 8080;
+const defaultPort = 22846;
+const parsePort = (...candidates) => {
+    for (const candidate of candidates) {
+        if (!candidate) {
+            continue;
+        }
+        const parsed = parseInt(candidate, 10);
+        if (Number.isInteger(parsed) && parsed > 0) {
+            return parsed;
+        }
+    }
+    return defaultPort;
+};
+const port = parsePort(process.env.PANEL_PROXY_PORT, process.env.PORT);
 const ack = (action, id, result) => ({
     id,
     type: 'ack',
@@ -25,6 +38,21 @@ const ackError = (action, id, code, message) => ({
     action,
     error: { code, message },
 });
+const decodeWsMessage = (raw) => {
+    if (typeof raw === 'string') {
+        return raw;
+    }
+    if (Buffer.isBuffer(raw)) {
+        return raw.toString();
+    }
+    if (raw instanceof ArrayBuffer) {
+        return Buffer.from(raw).toString();
+    }
+    if (Array.isArray(raw)) {
+        return Buffer.concat(raw.filter(Buffer.isBuffer)).toString();
+    }
+    return String(raw);
+};
 async function main() {
     const app = (0, fastify_1.default)({ logger: false });
     await app.register(websocket_1.default);
@@ -60,13 +88,13 @@ async function main() {
         const response = { ok: true, data };
         return response;
     });
-    app.get('/ws', { websocket: true }, (connection) => {
-        const ws = connection.socket;
+    app.get('/ws', { websocket: true }, (socket, _request) => {
+        const ws = socket;
         browserWsHub_1.browserWsHub.addClient(ws);
         ws.on('message', (raw) => {
             let message;
             try {
-                message = JSON.parse(raw.toString());
+                message = JSON.parse(decodeWsMessage(raw));
             }
             catch {
                 ws.send(JSON.stringify(ackError('chat.send', undefined, 'invalid_json', 'Invalid command envelope')));

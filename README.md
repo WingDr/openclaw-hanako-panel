@@ -197,3 +197,111 @@
 - `docs/11 Panel Proxy 最小接口协议 v0.1 2026-03-22.md`
 
 这三份文档已经把首版前端骨架、Gateway 实时数据流和 panel proxy 最小协议整理成了可以直接进入编码阶段的草案。
+
+## 本地启动
+
+当前推荐的本地开发方式已经统一到仓库根目录。
+
+### 1. 首次安装依赖
+
+在仓库根目录依次执行：
+
+```bash
+npm install
+npm install --prefix panel-web
+npm install --prefix panel-proxy
+```
+
+### 2. 准备根目录 `.env`
+
+先复制一份示例配置：
+
+```bash
+cp .env.example .env
+```
+
+默认示例内容如下：
+
+```dotenv
+PANEL_WEB_PORT=5173
+PANEL_PROXY_PORT=22846
+VITE_PANEL_API_BASE_URL=http://localhost:22846
+VITE_PANEL_WS_URL=ws://localhost:22846/ws
+```
+
+### 3. 一条命令同时启动
+
+在仓库根目录执行：
+
+```bash
+npm run dev
+```
+
+这会同时启动：
+
+- `panel-web` 的 Vite 开发服务器
+- `panel-proxy` 的 HTTP / WebSocket 服务
+
+## 环境变量说明
+
+### `PANEL_WEB_PORT`
+
+- 用途：控制 `panel-web` 的开发端口和 preview 端口
+- 默认值：`5173`
+- 示例：`PANEL_WEB_PORT=4173`
+
+### `PANEL_PROXY_PORT`
+
+- 用途：控制 `panel-proxy` 的 HTTP / WebSocket 监听端口
+- 默认值：`22846`
+- 示例：`PANEL_PROXY_PORT=3001`
+- 兼容性：如果没有设置这个变量，`panel-proxy` 仍会兼容旧的 `PORT`
+
+### `VITE_PANEL_API_BASE_URL`
+
+- 用途：前端请求 proxy HTTP API 的基地址
+- 默认值：`http://localhost:22846`
+- 示例：`VITE_PANEL_API_BASE_URL=http://192.168.1.20:22846`
+
+### `VITE_PANEL_WS_URL`
+
+- 用途：前端连接 proxy WebSocket 的地址
+- 默认值：`ws://localhost:22846/ws`
+- 示例：`VITE_PANEL_WS_URL=ws://192.168.1.20:22846/ws`
+
+## 单独启动子项目
+
+如果只想单独调试某一个子项目，也可以分别启动。
+
+### 只启动 `panel-web`
+
+```bash
+cd panel-web
+npm run dev
+```
+
+`panel-web` 会从根目录读取 `.env`，因此仍然建议先准备好仓库根的 `.env`。
+
+### 只启动 `panel-proxy`
+
+```bash
+cd panel-proxy
+npm run dev
+```
+
+`panel-proxy` 的 `dev` 和 `start` 脚本会读取仓库根目录的 `.env`。
+
+## 构建
+
+如果要从仓库根目录统一构建：
+
+```bash
+npm run build
+```
+
+这个命令会先构建 `panel-proxy`，再构建 `panel-web`。
+
+## 说明
+
+当前这套统一启动方案优先服务本地开发体验，不等同于完整的生产部署方案。  
+如果后面需要做局域网长期运行、反向代理、systemd、Docker 或容器化部署，建议再单独补一层部署编排。

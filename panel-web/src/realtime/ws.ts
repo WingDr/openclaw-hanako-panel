@@ -1,3 +1,5 @@
+import { panelWsUrl } from '../config'
+
 // Lightweight WebSocket wrapper to be wired to panel-proxy later.
 export type MessagePayload = unknown
 export type MessageHandler = (payload: MessagePayload) => void
@@ -6,7 +8,7 @@ export class RealtimeClient {
   private ws?: WebSocket
   private onMessage?: MessageHandler
 
-  constructor(private url: string) {}
+  constructor(private url: string = panelWsUrl) {}
 
   connect() {
     // In a mock environment, don't require real WS
@@ -32,7 +34,7 @@ export class RealtimeClient {
 }
 
 // Quick mock: expose a factory for tests to subscribe to fake messages
-export function createMockRealtime(url: string = 'ws://localhost') {
+export function createMockRealtime(url: string = panelWsUrl) {
   const client = new RealtimeClient(url)
   // no real connection; in test/mocking, you can trigger messages via setTimeout
   return client

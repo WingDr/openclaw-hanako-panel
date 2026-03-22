@@ -1,0 +1,16 @@
+{
+  "name": "openclaw-hanako-panel",
+  "private": true,
+  "scripts": {
+    "dev": "dotenv -e .env -- concurrently -k -n web,proxy -c cyan,green \"npm run dev:web\" \"npm run dev:proxy\"",
+    "dev:web": "npm --prefix panel-web run dev",
+    "dev:proxy": "npm --prefix panel-proxy run dev",
+    "build": "npm run build:proxy && npm run build:web",
+    "build:web": "dotenv -e .env -- npm --prefix panel-web run build",
+    "build:proxy": "npm --prefix panel-proxy run build"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "dotenv-cli": "^8.0.0"
+  }
+}
