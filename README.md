@@ -225,9 +225,14 @@ cp .env.example .env
 ```dotenv
 PANEL_WEB_PORT=5173
 PANEL_PROXY_PORT=22846
-VITE_PANEL_API_BASE_URL=http://localhost:22846
-VITE_PANEL_WS_URL=ws://localhost:22846/ws
+# 留空时，panel-web 会默认连接到“当前页面主机名 + PANEL_PROXY_PORT”
+VITE_PANEL_API_BASE_URL=
+VITE_PANEL_WS_URL=
 ```
+
+如果你是从另一台设备通过局域网地址访问，例如 `http://192.168.1.20:5173`，推荐先保持 `VITE_PANEL_API_BASE_URL` 和 `VITE_PANEL_WS_URL` 为空，让前端自动连到 `192.168.1.20:22846`。
+
+只有当 `panel-web` 和 `panel-proxy` 不在同一台机器上时，才需要显式填写这两个变量。
 
 ### 3. 一条命令同时启动
 
@@ -260,13 +265,15 @@ npm run dev
 ### `VITE_PANEL_API_BASE_URL`
 
 - 用途：前端请求 proxy HTTP API 的基地址
-- 默认值：`http://localhost:22846`
+- 默认行为：留空时自动使用 `当前页面协议 + 当前页面主机名 + PANEL_PROXY_PORT`
+- 本机访问示例：`http://localhost:22846`
 - 示例：`VITE_PANEL_API_BASE_URL=http://192.168.1.20:22846`
 
 ### `VITE_PANEL_WS_URL`
 
 - 用途：前端连接 proxy WebSocket 的地址
-- 默认值：`ws://localhost:22846/ws`
+- 默认行为：留空时自动使用 `当前页面协议对应的 ws/wss + 当前页面主机名 + PANEL_PROXY_PORT + /ws`
+- 本机访问示例：`ws://localhost:22846/ws`
 - 示例：`VITE_PANEL_WS_URL=ws://192.168.1.20:22846/ws`
 
 ## 单独启动子项目
