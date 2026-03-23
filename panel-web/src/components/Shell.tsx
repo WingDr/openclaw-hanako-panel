@@ -1,6 +1,6 @@
-import React, { useEffect } from 'react'
+import React, { useEffect, useMemo } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
-import { fetchAgents, fetchBootstrap, fetchSessions, formatRelativeTime } from '../api/client'
+import { fetchAgents, fetchBootstrap, fetchSessions, formatRelativeTime, type ChatSession } from '../api/client'
 import { panelRealtime } from '../realtime/ws'
 import { useChatStore } from '../store'
 
@@ -14,9 +14,9 @@ const statusLabelTone: Record<string, string> = {
   closed: 'tone-muted',
 }
 
-function isConversationSession(sessionId: string, sessionName: string): boolean {
+function isChannelSession(sessionId: string, sessionName: string): boolean {
   const value = `${sessionId} ${sessionName}`.toLowerCase()
-  return ![
+  return [
     'channel:',
     ':channel:',
     'channel session',
@@ -25,22 +25,42 @@ function isConversationSession(sessionId: string, sessionName: string): boolean 
   ].some((pattern) => value.includes(pattern))
 }
 
+function splitSessionsByKind(agentSessions: ChatSession[]) {
+  const regularSessions: ChatSession[] = []
+  const channelSessions: ChatSession[] = []
+
+  for (const session of agentSessions) {
+    if (isChannelSession(session.id, session.name)) {
+      channelSessions.push(session)
+      continue
+    }
+
+    regularSessions.push(session)
+  }
+
+  return { regularSessions, channelSessions }
+}
+
 export default function Shell({ children }: { children?: React.ReactNode }) {
   const location = useLocation()
   const agents = useChatStore((state) => state.agents)
   const currentAgentId = useChatStore((state) => state.currentAgentId)
   const currentSessionId = useChatStore((state) => state.currentSessionId)
-  const sessions = useChatStore((state) => state.sessions)
   const setAgents = useChatStore((state) => state.setAgents)
-  const setCurrentAgentId = useChatStore((state) => state.setCurrentAgentId)
   const setSessions = useChatStore((state) => state.setSessions)
   const setSessionId = useChatStore((state) => state.setSessionId)
   const [loadingAgents, setLoadingAgents] = React.useState(true)
-  const [loadingSessions, setLoadingSessions] = React.useState(false)
+  const [sessionsByAgent, setSessionsByAgent] = React.useState<Record<string, ChatSession[]>>({})
+  const [loadingSessionAgentIds, setLoadingSessionAgentIds] = React.useState<string[]>([])
+  const [expandedAgentIds, setExpandedAgentIds] = React.useState<string[]>([])
+  const [expandedChannelAgentIds, setExpandedChannelAgentIds] = React.useState<string[]>([])
   const [sidebarError, setSidebarError] = React.useState<string | null>(null)
   const [proxyVersion, setProxyVersion] = React.useState<string>('unknown')
   const [gatewayConnected, setGatewayConnected] = React.useState(false)
   const isManageRoute = location.pathname.startsWith('/manage')
+  const expandedAgentIdSet = useMemo(() => new Set(expandedAgentIds), [expandedAgentIds])
+  const expandedChannelAgentIdSet = useMemo(() => new Set(expandedChannelAgentIds), [expandedChannelAgentIds])
+  const loadingSessionAgentIdSet = useMemo(() => new Set(loadingSessionAgentIds), [loadingSessionAgentIds])
 
   useEffect(() => {
     let cancelled = false
@@ -83,23 +103,64 @@ export default function Shell({ children }: { children?: React.ReactNode }) {
   }, [setAgents])
 
   useEffect(() => {
+    const validAgentIds = new Set(agents.map((agent) => agent.id))
+    setExpandedAgentIds((currentIds) => currentIds.filter((id) => validAgentIds.has(id)))
+    setExpandedChannelAgentIds((currentIds) => currentIds.filter((id) => validAgentIds.has(id)))
+    setSessionsByAgent((currentMap) => Object.fromEntries(
+      Object.entries(currentMap).filter(([agentId]) => validAgentIds.has(agentId)),
+    ))
+  }, [agents])
+
+  useEffect(() => {
     if (!currentAgentId) {
       setSessions([])
       return
     }
 
+    const currentAgentSessions = sessionsByAgent[currentAgentId]
+    if (currentAgentSessions) {
+      setSessions(currentAgentSessions)
+    }
+  }, [currentAgentId, sessionsByAgent, setSessions])
+
+  useEffect(() => {
+    const targetAgentIds = Array.from(new Set([
+      currentAgentId,
+      ...expandedAgentIds,
+    ].filter((value): value is string => Boolean(value))))
+
+    if (targetAgentIds.length === 0) {
+      return
+    }
+
     let cancelled = false
 
-    const loadSessions = async (options?: { silent?: boolean }) => {
+    const markLoading = (agentId: string, loading: boolean) => {
+      if (loading) {
+        setLoadingSessionAgentIds((currentIds) => currentIds.includes(agentId) ? currentIds : [...currentIds, agentId])
+        return
+      }
+
+      setLoadingSessionAgentIds((currentIds) => currentIds.filter((id) => id !== agentId))
+    }
+
+    const loadSessionsForAgent = async (agentId: string, options?: { silent?: boolean }) => {
       if (!options?.silent) {
-        setLoadingSessions(true)
-        setSessions([])
+        markLoading(agentId, true)
       }
 
       try {
-        const nextSessions = await fetchSessions(currentAgentId)
+        const nextSessions = await fetchSessions(agentId)
         if (!cancelled) {
-          setSessions(nextSessions.filter((session) => isConversationSession(session.id, session.name)))
+          setSessionsByAgent((currentMap) => ({
+            ...currentMap,
+            [agentId]: nextSessions,
+          }))
+
+          if (useChatStore.getState().currentAgentId === agentId) {
+            setSessions(nextSessions)
+          }
+
           setSidebarError(null)
         }
       } catch (error) {
@@ -108,23 +169,44 @@ export default function Shell({ children }: { children?: React.ReactNode }) {
         }
       } finally {
         if (!cancelled) {
-          setLoadingSessions(false)
+          markLoading(agentId, false)
         }
       }
     }
 
-    void loadSessions()
+    void Promise.all(targetAgentIds.map((agentId) => loadSessionsForAgent(agentId)))
     const intervalId = window.setInterval(() => {
-      void loadSessions({ silent: true })
+      void Promise.all(targetAgentIds.map((agentId) => loadSessionsForAgent(agentId, { silent: true })))
     }, 10_000)
 
     return () => {
       cancelled = true
       window.clearInterval(intervalId)
     }
-  }, [currentAgentId, setSessions])
+  }, [currentAgentId, expandedAgentIds, setSessions])
 
-  const handleSelectSession = (sessionId: string) => {
+  const toggleAgentExpanded = (agentId: string) => {
+    setExpandedAgentIds((currentIds) => (
+      currentIds.includes(agentId)
+        ? currentIds.filter((id) => id !== agentId)
+        : [...currentIds, agentId]
+    ))
+  }
+
+  const toggleChannelSessionsExpanded = (agentId: string) => {
+    setExpandedChannelAgentIds((currentIds) => (
+      currentIds.includes(agentId)
+        ? currentIds.filter((id) => id !== agentId)
+        : [...currentIds, agentId]
+    ))
+  }
+
+  const handleSelectSession = (agentId: string, agentSessions: ChatSession[], sessionId: string) => {
+    if (agentId !== currentAgentId) {
+      useChatStore.getState().setCurrentAgentId(agentId)
+      setSessions(agentSessions)
+    }
+
     setSessionId(sessionId)
     void panelRealtime.sendCommand('session.open', { sessionKey: sessionId }).catch((error) => {
       setSidebarError(error instanceof Error ? error.message : 'Failed to open session')
@@ -157,19 +239,20 @@ export default function Shell({ children }: { children?: React.ReactNode }) {
             )}
             {agents.map((agent) => {
               const active = agent.id === currentAgentId
+              const expanded = expandedAgentIdSet.has(agent.id)
+              const agentSessions = sessionsByAgent[agent.id] ?? []
+              const loadingSessions = loadingSessionAgentIdSet.has(agent.id)
+              const { regularSessions, channelSessions } = splitSessionsByKind(agentSessions)
+              const channelExpanded = expandedChannelAgentIdSet.has(agent.id)
 
               return (
                 <section
                   key={agent.id}
-                  className={`pw-agent-card ${active ? 'is-active' : ''}`}
+                  className={`pw-agent-card ${active ? 'is-active' : ''} ${expanded ? 'is-expanded' : ''}`}
                 >
                   <button
                     className="pw-agent-button"
-                    onClick={() => {
-                      if (agent.id !== currentAgentId) {
-                        setCurrentAgentId(agent.id)
-                      }
-                    }}
+                    onClick={() => toggleAgentExpanded(agent.id)}
                   >
                     <div className="pw-agent-avatar">{agent.name.slice(0, 1)}</div>
                     <div className="pw-agent-copy">
@@ -183,20 +266,23 @@ export default function Shell({ children }: { children?: React.ReactNode }) {
                         {agent.capabilities.join(' · ') || 'No capability metadata'}
                       </div>
                     </div>
+                    <span className={`pw-disclosure ${expanded ? 'is-open' : ''}`} aria-hidden="true">
+                      ▾
+                    </span>
                   </button>
 
-                  {active && (
+                  {expanded && (
                     <div className="pw-session-tree">
-                      <div className="pw-session-tree-label">Conversation sessions</div>
+                      <div className="pw-session-tree-label">Sessions</div>
                       {loadingSessions && <div className="pw-empty-state small">Loading sessions...</div>}
-                      {!loadingSessions && sessions.length === 0 && (
-                        <div className="pw-empty-state small">No conversation sessions for this agent.</div>
+                      {!loadingSessions && regularSessions.length === 0 && channelSessions.length === 0 && (
+                        <div className="pw-empty-state small">No sessions for this agent.</div>
                       )}
-                      {sessions.map((session) => (
+                      {regularSessions.map((session) => (
                         <button
                           key={session.id}
                           className={`pw-session-button ${session.id === currentSessionId ? 'is-active' : ''}`}
-                          onClick={() => handleSelectSession(session.id)}
+                          onClick={() => handleSelectSession(agent.id, agentSessions, session.id)}
                         >
                           <div className="pw-session-title-row">
                             <span className="pw-session-title">{session.name}</span>
@@ -212,6 +298,41 @@ export default function Shell({ children }: { children?: React.ReactNode }) {
                           </div>
                         </button>
                       ))}
+                      {channelSessions.length > 0 && (
+                        <div className="pw-session-group">
+                          <button
+                            className={`pw-session-group-toggle ${channelExpanded ? 'is-open' : ''}`}
+                            onClick={() => toggleChannelSessionsExpanded(agent.id)}
+                          >
+                            <span>Channel sessions</span>
+                            <span className="pw-session-group-meta">{channelSessions.length}</span>
+                          </button>
+                          {channelExpanded && (
+                            <div className="pw-session-group-list">
+                              {channelSessions.map((session) => (
+                                <button
+                                  key={session.id}
+                                  className={`pw-session-button ${session.id === currentSessionId ? 'is-active' : ''}`}
+                                  onClick={() => handleSelectSession(agent.id, agentSessions, session.id)}
+                                >
+                                  <div className="pw-session-title-row">
+                                    <span className="pw-session-title">{session.name}</span>
+                                    <span className="pw-session-time">
+                                      {session.updated || formatRelativeTime(session.updatedAt) || '--'}
+                                    </span>
+                                  </div>
+                                  <div className="pw-session-meta-row">
+                                    <span className="pw-session-key">{session.id}</span>
+                                    <span className={`pw-badge ${statusLabelTone[session.status || 'pending'] || 'tone-muted'}`}>
+                                      {session.status || 'pending'}
+                                    </span>
+                                  </div>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
                 </section>
