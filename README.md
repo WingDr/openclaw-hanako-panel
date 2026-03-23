@@ -67,6 +67,29 @@
 - channel 状态
 - 最近 session 活动概览
 
+## Agent 状态说明
+
+当前 `chat` / `status` 页里的 agent 状态不是 OpenClaw Gateway 直接返回的原生 runtime state。
+
+原因是当前可稳定使用的 Gateway RPC 里：
+
+- `agents.list` 适合拿 agent 名单与显示名
+- `status` 适合拿 heartbeat 配置、session 统计和最近活动
+- `system-presence` 返回的是 Gateway / client 节点 presence，不是 agent presence
+
+因此，`panel-proxy` 目前使用一层**启发式状态**：
+
+- 最近约 2 分钟内有 session 活动：显示为 `online`
+- 有历史活动或启用了 heartbeat，但最近没有新活动：显示为 `idle`
+- 既没有最近活动，也没有 heartbeat 线索：显示为 `offline`
+
+这层判断是 panel 侧的展示逻辑，不会写回 OpenClaw，也不代表上游已经提供了精确的 agent runtime state API。
+
+这部分实现参考了 `vvlang/openclaw-agent-monitor` 的思路，尤其是“根据最近活动时间判断工作中 / 空闲”的做法：
+
+- 项目地址：<https://github.com/vvlang/openclaw-agent-monitor>
+- 参考文件：<https://github.com/vvlang/openclaw-agent-monitor/blob/main/agent-status-writer.js>
+
 ## 当前明确暂缓的功能
 
 为了避免项目过早变重，下面这些功能不作为首版前提：
