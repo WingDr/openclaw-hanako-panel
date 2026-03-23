@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import tls from 'node:tls'
 import WebSocket from 'ws'
-import { Agent, BootstrapResponse, GatewayConnectionPayload, LogLine, Session } from './types'
+import { Agent, BootstrapResponse, ChatHistoryMessage, GatewayConnectionPayload, LogLine, Session } from './types'
 
 const openClawConfigPath = path.join(os.homedir(), '.openclaw', 'openclaw.json')
 const openClawDeviceIdentityPath = path.join(os.homedir(), '.openclaw', 'identity', 'device.json')
@@ -248,6 +248,149 @@ const normalizeSessionStatus = (value: unknown): Session['status'] => {
   }
 
   return 'opened'
+}
+
+const normalizeHistoryAuthor = (value: unknown): ChatHistoryMessage['author'] => {
+  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : ''
+  if ([
+    'user',
+    'human',
+    'operator',
+    'customer',
+    'client',
+    'request',
+    'prompt',
+    'input',
+    'incoming',
+    'inbound',
+  ].includes(normalized)) {
+    return 'user'
+  }
+
+  return 'agent'
+}
+
+function collectMessageText(value: unknown): string[] {
+  const directValue = asString(value)
+  if (directValue) {
+    return [directValue]
+  }
+
+  if (Array.isArray(value)) {
+    return value.flatMap((entry) => collectMessageText(entry))
+  }
+
+  const record = asRecord(value)
+  if (!record) {
+    return []
+  }
+
+  const parts = [
+    record.text,
+    record.message,
+    record.body,
+    record.value,
+    record.delta,
+    record.summary,
+    record.content,
+    record.contents,
+    record.parts,
+    record.segments,
+    record.items,
+    record.blocks,
+  ].flatMap((entry) => collectMessageText(entry))
+
+  if (parts.length > 0) {
+    return parts
+  }
+
+  return Object.keys(record)
+    .filter((key) => /^\d+$/.test(key))
+    .sort((left, right) => Number(left) - Number(right))
+    .flatMap((key) => collectMessageText(record[key]))
+}
+
+function normalizeHistoryRecord(
+  raw: unknown,
+  sessionKey: string,
+  index: number,
+  fallbackCreatedAt: string,
+): (ChatHistoryMessage & { order: number }) | undefined {
+  if (typeof raw === 'string') {
+    const text = trimToUndefined(raw)
+    if (!text) {
+      return undefined
+    }
+
+    return {
+      id: `${sessionKey}:history:${index + 1}`,
+      sessionKey,
+      author: 'agent',
+      text,
+      createdAt: fallbackCreatedAt,
+      order: index,
+    }
+  }
+
+  const record = asRecord(raw)
+  if (!record) {
+    return undefined
+  }
+
+  const text = trimToUndefined(collectMessageText(raw).join('\n\n'))
+  if (!text) {
+    return undefined
+  }
+
+  return {
+    id: asString(pickFirst(record, ['id', 'messageId', 'entryId', 'key'])) ?? `${sessionKey}:history:${index + 1}`,
+    sessionKey,
+    author: normalizeHistoryAuthor(pickFirst(record, ['author', 'role', 'sender', 'from', 'source', 'direction'])),
+    text,
+    createdAt: toIsoTimestamp(pickFirst(record, ['createdAt', 'timestamp', 'ts', 'time', 'at', 'date'])) ?? fallbackCreatedAt,
+    order: index,
+  }
+}
+
+function normalizeChatHistoryPayload(payload: unknown, sessionKey: string): ChatHistoryMessage[] {
+  const fallbackCreatedAt = new Date().toISOString()
+  const rawEntries = Array.isArray(payload)
+    ? payload
+    : (() => {
+        const record = asRecord(payload)
+        if (!record) {
+          return []
+        }
+
+        const nestedCollection = ['messages', 'history', 'items', 'list', 'entries', 'transcript', 'conversation']
+          .map((key) => record[key])
+          .find((value) => Array.isArray(value) || Boolean(asRecord(value)))
+
+        if (Array.isArray(nestedCollection)) {
+          return nestedCollection
+        }
+
+        const nestedRecord = asRecord(nestedCollection)
+        if (nestedRecord) {
+          return Object.values(nestedRecord)
+        }
+
+        return Object.keys(record).some((key) => ['text', 'message', 'content', 'role', 'author'].includes(key))
+          ? [record]
+          : []
+      })()
+
+  return rawEntries
+    .map((entry, index) => normalizeHistoryRecord(entry, sessionKey, index, fallbackCreatedAt))
+    .filter((entry): entry is ChatHistoryMessage & { order: number } => Boolean(entry))
+    .sort((left, right) => {
+      if (left.createdAt === right.createdAt) {
+        return left.order - right.order
+      }
+
+      return left.createdAt < right.createdAt ? -1 : 1
+    })
+    .map(({ order: _order, ...message }) => message)
 }
 
 function normalizeAgentRecord(raw: unknown, fallbackId?: string): Agent | undefined {
@@ -978,6 +1121,35 @@ export class GatewayLogsClient {
     }
   }
 
+  async chatHistory(params: { sessionKey: string }): Promise<ChatHistoryMessage[]> {
+    let lastError: Error | undefined
+
+    for (const method of ['chat.history', 'chat.history.get']) {
+      if (this.unsupportedMethods.has(method)) {
+        continue
+      }
+
+      try {
+        const payload = await this.request(method, { sessionKey: params.sessionKey })
+        return normalizeChatHistoryPayload(payload, params.sessionKey)
+      } catch (error) {
+        if (error instanceof Error && error.message.includes('unknown method')) {
+          this.unsupportedMethods.add(method)
+          lastError = error
+          continue
+        }
+
+        throw error
+      }
+    }
+
+    if (lastError) {
+      throw lastError
+    }
+
+    return []
+  }
+
   async systemPresence(): Promise<Agent[]> {
     if (this.systemPresenceUnavailable) {
       return []
@@ -1326,6 +1498,10 @@ export async function fetchAgentSessions(agentId: string): Promise<Session[]> {
 
 export async function fetchSessions(): Promise<Session[]> {
   return gatewayLogsClient.sessionsList()
+}
+
+export async function fetchChatHistory(sessionKey: string): Promise<ChatHistoryMessage[]> {
+  return gatewayLogsClient.chatHistory({ sessionKey })
 }
 
 export async function sendChatMessage(params: { sessionKey: string; text: string; agentId?: string }): Promise<ChatSendResult> {

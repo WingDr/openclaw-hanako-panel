@@ -1,7 +1,7 @@
 import Fastify from 'fastify'
 import fastifyWebsocket from '@fastify/websocket'
 import type WebSocket from 'ws'
-import { bootstrap, createPanelSession, fetchAgents, fetchAgentSessions, fetchSessions, sendChatMessage } from './gatewayClient'
+import { bootstrap, createPanelSession, fetchAgents, fetchAgentSessions, fetchChatHistory, fetchSessions, sendChatMessage } from './gatewayClient'
 import { getLogsSnapshot, getLogsStatus, getGatewayConnectionSnapshot, subscribeSubscriber, unsubscribeSubscriber } from './logsService'
 import { browserWsHub } from './browserWsHub'
 import { AckEnvelope, BrowserCommand, HttpOk, Session, StatusResponse } from './types'
@@ -27,6 +27,7 @@ const parsePort = (...candidates: Array<string | undefined>): number => {
 const port = parsePort(process.env.PANEL_PROXY_PORT, process.env.PORT)
 
 type AgentSessionsParams = { agentId: string }
+type ChatHistoryParams = { sessionKey: string }
 
 const ack = (action: BrowserCommand['cmd'], id?: string, result?: Record<string, unknown>): AckEnvelope => ({
   id,
@@ -96,6 +97,13 @@ async function main() {
   app.get<{ Params: AgentSessionsParams }>('/api/agents/:agentId/sessions', async (req) => {
     const agentId = req.params.agentId
     const data = await fetchAgentSessions(agentId)
+    const response: HttpOk<typeof data> = { ok: true, data }
+    return response
+  })
+
+  app.get<{ Params: ChatHistoryParams }>('/api/chat/:sessionKey/history', async (req) => {
+    const sessionKey = req.params.sessionKey
+    const data = await fetchChatHistory(sessionKey)
     const response: HttpOk<typeof data> = { ok: true, data }
     return response
   })

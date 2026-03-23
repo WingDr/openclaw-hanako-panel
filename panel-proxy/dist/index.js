@@ -82,6 +82,12 @@ async function main() {
         const response = { ok: true, data };
         return response;
     });
+    app.get('/api/chat/:sessionKey/history', async (req) => {
+        const sessionKey = req.params.sessionKey;
+        const data = await (0, gatewayClient_1.fetchChatHistory)(sessionKey);
+        const response = { ok: true, data };
+        return response;
+    });
     app.get('/api/status', async () => {
         const logsStatus = (0, logsService_1.getLogsStatus)();
         let agents = [];

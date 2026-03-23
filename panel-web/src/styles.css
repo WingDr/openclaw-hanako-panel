@@ -395,6 +395,12 @@ button {
   overflow: auto;
 }
 
+.pw-main-surface.is-chat {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
 .pw-right-rail {
   min-height: 0;
 }
@@ -539,6 +545,12 @@ button {
   gap: 18px;
 }
 
+.pw-chat-page {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .pw-chat-hero,
 .pw-manage-hero {
   padding: 4px 2px 0;
@@ -573,11 +585,13 @@ button {
 
 .pw-chat-surface {
   display: flex;
-  min-height: 520px;
+  flex: 1;
+  min-height: 0;
   flex-direction: column;
   border-radius: var(--radius-lg);
   padding: 18px;
   gap: 16px;
+  overflow: hidden;
 }
 
 .pw-message-stream {
@@ -587,7 +601,17 @@ button {
   flex-direction: column;
   gap: 12px;
   overflow: auto;
-  padding-right: 2px;
+  padding: 16px;
+  padding-right: 10px;
+  border-radius: 22px;
+  border: 1px solid rgba(101, 76, 48, 0.12);
+  background: rgba(255, 255, 255, 0.42);
+  scrollbar-gutter: stable;
+}
+
+.pw-message-stream-end {
+  height: 1px;
+  flex-shrink: 0;
 }
 
 .pw-message-row {

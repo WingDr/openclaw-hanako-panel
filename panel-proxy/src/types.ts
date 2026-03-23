@@ -16,6 +16,14 @@ export type Session = {
   status: SessionStatus
 }
 
+export type ChatHistoryMessage = {
+  id: string
+  sessionKey: string
+  author: 'agent' | 'user'
+  text: string
+  createdAt: string
+}
+
 export type LogLine = {
   ts: string
   level: 'info' | 'warn' | 'error'

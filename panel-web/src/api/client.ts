@@ -84,6 +84,14 @@ type ProxySession = {
   status?: SessionStatus
 }
 
+type ProxyChatHistoryMessage = {
+  id: string
+  sessionKey: string
+  author: 'agent' | 'user'
+  text: string
+  createdAt: string
+}
+
 type ProxyLogLine = {
   ts: string
   level: 'info' | 'warn' | 'error'
@@ -159,6 +167,16 @@ export function mapProxySession(session: ProxySession): ChatSession {
   }
 }
 
+export function mapProxyChatHistoryMessage(message: ProxyChatHistoryMessage): Message {
+  return {
+    id: message.id,
+    sessionId: message.sessionKey,
+    author: message.author,
+    text: message.text,
+    timestamp: formatClockTime(message.createdAt),
+  }
+}
+
 export function mapProxyLogLine(line: ProxyLogLine, index: number): LogEntry {
   return {
     id: `log-${index}-${line.ts}`,
@@ -181,6 +199,11 @@ export async function fetchAgents(): Promise<AgentSummary[]> {
 export async function fetchSessions(agentId: string = 'main'): Promise<ChatSession[]> {
   const sessions = await fetchProxyData<ProxySession[]>(`/api/agents/${encodeURIComponent(agentId)}/sessions`)
   return sessions.map(mapProxySession)
+}
+
+export async function fetchChatHistory(sessionKey: string): Promise<Message[]> {
+  const messages = await fetchProxyData<ProxyChatHistoryMessage[]>(`/api/chat/${encodeURIComponent(sessionKey)}/history`)
+  return messages.map(mapProxyChatHistoryMessage)
 }
 
 export async function fetchLogs(): Promise<LogEntry[]> {

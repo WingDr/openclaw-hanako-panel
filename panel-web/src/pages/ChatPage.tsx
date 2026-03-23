@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react'
-import { formatRelativeTime, mapProxySession } from '../api/client'
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { fetchChatHistory, formatRelativeTime, mapProxySession } from '../api/client'
 import { panelRealtime } from '../realtime/ws'
 import { useChatStore } from '../store'
 import type { Message } from '../store'
@@ -29,12 +29,18 @@ export default function ChatPage() {
   const sessions = useChatStore((state) => state.sessions)
   const messagesBySession = useChatStore((state) => state.messagesBySession)
   const upsertSession = useChatStore((state) => state.upsertSession)
+  const setSessionMessages = useChatStore((state) => state.setSessionMessages)
   const addUserMessage = useChatStore((state) => state.addUserMessage)
   const [text, setText] = useState('')
   const [createPending, setCreatePending] = useState(false)
   const [sendPending, setSendPending] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [lastAck, setLastAck] = useState<string | null>(null)
+  const [historyPending, setHistoryPending] = useState(false)
+  const [historyError, setHistoryError] = useState<string | null>(null)
+  const loadedHistorySessionIds = useRef<Set<string>>(new Set())
+  const messageStreamRef = useRef<HTMLDivElement | null>(null)
+  const messageStreamEndRef = useRef<HTMLDivElement | null>(null)
   const currentAgent = useMemo(
     () => agents.find((agent) => agent.id === currentAgentId),
     [agents, currentAgentId],
@@ -45,6 +51,95 @@ export default function ChatPage() {
   )
   const currentMessages: Message[] = messagesBySession[currentSessionId] ?? []
   const currentAgentOffline = currentAgent?.status === 'offline'
+
+  const scrollMessagesToBottom = () => {
+    const container = messageStreamRef.current
+    const anchor = messageStreamEndRef.current
+    if (!container || !anchor) {
+      return
+    }
+
+    anchor.scrollIntoView({ block: 'end' })
+  }
+
+  useEffect(() => {
+    if (!currentSessionId) {
+      setHistoryPending(false)
+      setHistoryError(null)
+      return
+    }
+
+    const existingMessages = useChatStore.getState().messagesBySession[currentSessionId] ?? []
+    if (loadedHistorySessionIds.current.has(currentSessionId) || existingMessages.length > 0) {
+      setHistoryPending(false)
+      setHistoryError(null)
+      return
+    }
+
+    let cancelled = false
+    setHistoryPending(true)
+    setHistoryError(null)
+
+    void fetchChatHistory(currentSessionId)
+      .then((messages) => {
+        if (cancelled) {
+          return
+        }
+
+        setSessionMessages(currentSessionId, messages)
+        loadedHistorySessionIds.current.add(currentSessionId)
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setHistoryError(error instanceof Error ? error.message : 'Failed to load session history')
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setHistoryPending(false)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [currentSessionId, setSessionMessages])
+
+  useLayoutEffect(() => {
+    if (!currentSessionId) {
+      return
+    }
+
+    const firstFrameId = window.requestAnimationFrame(() => {
+      const secondFrameId = window.requestAnimationFrame(() => {
+        scrollMessagesToBottom()
+      })
+
+      ;(firstFrameId as unknown as { nestedFrameId?: number }).nestedFrameId = secondFrameId
+    })
+
+    return () => {
+      const nestedFrameId = (firstFrameId as unknown as { nestedFrameId?: number }).nestedFrameId
+      if (typeof nestedFrameId === 'number') {
+        window.cancelAnimationFrame(nestedFrameId)
+      }
+      window.cancelAnimationFrame(firstFrameId)
+    }
+  }, [currentSessionId, currentMessages.length, historyPending])
+
+  useEffect(() => {
+    if (!currentSessionId || historyPending) {
+      return
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      scrollMessagesToBottom()
+    }, 0)
+
+    return () => {
+      window.clearTimeout(timeoutId)
+    }
+  }, [currentSessionId, currentMessages.length, historyPending])
 
   const onSend = async () => {
     const trimmed = text.trim()
@@ -141,15 +236,25 @@ export default function ChatPage() {
       )}
 
       <section className="pw-chat-surface" aria-label="Chat workspace">
-        <div className="pw-message-stream">
+        <div ref={messageStreamRef} className="pw-message-stream">
           {!currentSessionId && (
             <div className="pw-empty-state">
               No session available for the selected agent yet.
             </div>
           )}
-          {currentSessionId && currentMessages.length === 0 && (
+          {currentSessionId && historyPending && currentMessages.length === 0 && (
             <div className="pw-empty-state">
-              This session is connected to panel-proxy. Sends now go through the real proxy/Gateway path, while transcript history is still local until the proxy exposes message read APIs.
+              Loading conversation history...
+            </div>
+          )}
+          {currentSessionId && !historyPending && historyError && currentMessages.length === 0 && (
+            <div className="pw-empty-state">
+              {historyError}
+            </div>
+          )}
+          {currentSessionId && !historyPending && !historyError && currentMessages.length === 0 && (
+            <div className="pw-empty-state">
+              No messages in this session yet.
             </div>
           )}
           {currentMessages.map((m: Message) => (
@@ -163,6 +268,7 @@ export default function ChatPage() {
               </div>
             </div>
           ))}
+          <div ref={messageStreamEndRef} className="pw-message-stream-end" aria-hidden="true" />
         </div>
 
         <div className="pw-input-shell">

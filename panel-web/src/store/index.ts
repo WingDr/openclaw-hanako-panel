@@ -20,6 +20,7 @@ type State = {
   setSessions: (sessions: ChatSession[]) => void
   upsertSession: (session: ChatSession) => void
   setSessionId: (id: string) => void
+  setSessionMessages: (sessionId: string, messages: Message[]) => void
   addUserMessage: (sessionId: string, text: string) => void
   addAgentMessage: (sessionId: string, text: string) => void
 }
@@ -31,6 +32,23 @@ const messageId = () => {
   }
 
   return `m-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+const mergeSessionMessages = (history: Message[], existing: Message[]): Message[] => {
+  const seen = new Set<string>()
+  const merged: Message[] = []
+
+  for (const message of [...history, ...existing]) {
+    const signature = `${message.author}\u001f${message.timestamp}\u001f${message.text}`
+    if (seen.has(signature)) {
+      continue
+    }
+
+    seen.add(signature)
+    merged.push(message)
+  }
+
+  return merged
 }
 
 export const useChatStore = create<State>((set) => {
@@ -94,6 +112,13 @@ export const useChatStore = create<State>((set) => {
       }
     }),
     setSessionId: (id: string) => set((s) => ({ ...s, currentSessionId: id })),
+    setSessionMessages: (sessionId: string, messages: Message[]) => set((state) => ({
+      ...state,
+      messagesBySession: {
+        ...state.messagesBySession,
+        [sessionId]: mergeSessionMessages(messages, state.messagesBySession[sessionId] ?? []),
+      },
+    })),
     addUserMessage: (sessionId: string, text: string) => set((state) => appendMessage(state, sessionId, 'user', text)),
     addAgentMessage: (sessionId: string, text: string) => set((state) => appendMessage(state, sessionId, 'agent', text)),
   }

@@ -7,9 +7,14 @@ const runtimeLocation = typeof window !== 'undefined' ? window.location : undefi
 const runtimeHostname = runtimeLocation?.hostname || 'localhost'
 const runtimeHttpProtocol = runtimeLocation?.protocol === 'https:' ? 'https:' : 'http:'
 const runtimeWsProtocol = runtimeLocation?.protocol === 'https:' ? 'wss:' : 'ws:'
+const runtimeOrigin = runtimeLocation?.origin
 
-const defaultApiBaseUrl = `${runtimeHttpProtocol}//${runtimeHostname}:${defaultProxyPort}`
-const defaultWsUrl = `${runtimeWsProtocol}//${runtimeHostname}:${defaultProxyPort}/ws`
+const defaultApiBaseUrl = import.meta.env.DEV
+  ? '/api'
+  : `${runtimeHttpProtocol}//${runtimeHostname}:${defaultProxyPort}`
+const defaultWsUrl = import.meta.env.DEV
+  ? '/ws'
+  : `${runtimeWsProtocol}//${runtimeHostname}:${defaultProxyPort}/ws`
 
 const rewriteLocalhostTarget = (value: string): string => {
   if (!runtimeLocation || localHostnames.has(runtimeHostname)) {
@@ -29,11 +34,27 @@ const rewriteLocalhostTarget = (value: string): string => {
   }
 }
 
+const resolveHttpBaseUrl = (value: string): string => {
+  if (value.startsWith('/')) {
+    return runtimeOrigin ? new URL(value, runtimeOrigin).toString() : value
+  }
+
+  return rewriteLocalhostTarget(value)
+}
+
+const resolveWsTarget = (value: string): string => {
+  if (value.startsWith('/')) {
+    return runtimeLocation ? `${runtimeWsProtocol}//${runtimeLocation.host}${value}` : value
+  }
+
+  return rewriteLocalhostTarget(value)
+}
+
 export const panelApiBaseUrl = stripTrailingSlash(
-  rewriteLocalhostTarget(import.meta.env.VITE_PANEL_API_BASE_URL || defaultApiBaseUrl),
+  resolveHttpBaseUrl(import.meta.env.VITE_PANEL_API_BASE_URL || defaultApiBaseUrl),
 )
 
-export const panelWsUrl = rewriteLocalhostTarget(import.meta.env.VITE_PANEL_WS_URL || defaultWsUrl)
+export const panelWsUrl = resolveWsTarget(import.meta.env.VITE_PANEL_WS_URL || defaultWsUrl)
 
 export function createPanelApiUrl(pathname: string): string {
   const normalizedPath = pathname.startsWith('/') ? pathname.slice(1) : pathname
