@@ -174,12 +174,13 @@ export function getGatewayConnectionSnapshot(): GatewayConnectionPayload {
 }
 
 export function getLogsStatus() {
+  const liveTailAvailable = state.initialized && !state.lastError
   return {
     polling: state.polling,
     initialized: state.initialized,
     lastError: state.lastError,
     lastPollAt: state.lastPollAt,
-    connected: gatewayLogsClient.getConnectionSnapshot().connected,
+    connected: liveTailAvailable,
   }
 }
 

@@ -20,18 +20,6 @@ const gatewayClientMode = 'backend'
 const gatewayDeviceScopes = ['operator.read', 'operator.write'] as const
 const ed25519SpkiPrefix = Buffer.from('302a300506032b6570032100', 'hex')
 
-const mockAgents: Agent[] = [
-  { agentId: 'main', label: 'Main', status: 'online', capabilities: ['chat', 'session'] },
-  { agentId: 'research', label: 'Research', status: 'online', capabilities: ['chat'] },
-  { agentId: 'design', label: 'Design', status: 'idle', capabilities: ['session'] },
-]
-
-let mockSessions: Session[] = [
-  { sessionKey: 'agent:main:panel:daily-review', agentId: 'main', updatedAt: new Date().toISOString(), preview: 'Continue panel review', status: 'opened' },
-  { sessionKey: 'agent:main:panel:debug-stream', agentId: 'main', updatedAt: new Date().toISOString(), preview: 'Check live events', status: 'pending' },
-  { sessionKey: 'agent:research:panel:notes', agentId: 'research', updatedAt: new Date().toISOString(), preview: 'Research notes thread', status: 'opened' },
-]
-
 type OpenClawGatewayConfig = {
   gateway?: {
     port?: number
@@ -110,9 +98,381 @@ export type GatewayLogsTailResult = {
   reset?: boolean
 }
 
+export type ChatSendResult = {
+  accepted: boolean
+  runId?: string
+}
+
+export type SessionCreateResult = {
+  accepted: boolean
+  created: boolean
+  session: Session
+}
+
 const trimToUndefined = (value?: string): string | undefined => {
   const trimmed = value?.trim()
   return trimmed ? trimmed : undefined
+}
+
+const sessionKeyAgentPattern = /^agent:([^:]+):/
+
+const asRecord = (value: unknown): Record<string, unknown> | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined
+  }
+
+  return value as Record<string, unknown>
+}
+
+const asString = (value: unknown): string | undefined => {
+  if (typeof value !== 'string') {
+    return undefined
+  }
+
+  return trimToUndefined(value)
+}
+
+const asBoolean = (value: unknown): boolean | undefined => {
+  return typeof value === 'boolean' ? value : undefined
+}
+
+const asFiniteNumber = (value: unknown): number | undefined => {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value
+  }
+
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : undefined
+  }
+
+  return undefined
+}
+
+const pickFirst = (record: Record<string, unknown>, keys: string[]): unknown => {
+  for (const key of keys) {
+    if (record[key] !== undefined && record[key] !== null) {
+      return record[key]
+    }
+  }
+
+  return undefined
+}
+
+const collectStringList = (...values: unknown[]): string[] => {
+  const output = new Set<string>()
+
+  for (const value of values) {
+    const directValue = asString(value)
+    if (directValue) {
+      output.add(directValue)
+      continue
+    }
+
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        const next = asString(item)
+        if (next) {
+          output.add(next)
+        }
+      }
+      continue
+    }
+
+    const record = asRecord(value)
+    if (record) {
+      for (const [key, entry] of Object.entries(record)) {
+        if (entry === true) {
+          output.add(key)
+          continue
+        }
+
+        const next = asString(entry)
+        if (next) {
+          output.add(next)
+        }
+      }
+    }
+  }
+
+  return [...output]
+}
+
+const toIsoTimestamp = (value: unknown): string | undefined => {
+  const stringValue = asString(value)
+  if (stringValue) {
+    const parsed = Date.parse(stringValue)
+    return Number.isNaN(parsed) ? undefined : new Date(parsed).toISOString()
+  }
+
+  const numericValue = asFiniteNumber(value)
+  if (numericValue === undefined) {
+    return undefined
+  }
+
+  return new Date(numericValue).toISOString()
+}
+
+const inferAgentIdFromSessionKey = (sessionKey: string): string | undefined => {
+  const match = sessionKey.match(sessionKeyAgentPattern)
+  return match?.[1]
+}
+
+const normalizeAgentStatus = (value: unknown): Agent['status'] => {
+  const booleanValue = asBoolean(value)
+  if (booleanValue !== undefined) {
+    return booleanValue ? 'online' : 'offline'
+  }
+
+  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : ''
+  if (['online', 'connected', 'ready', 'active', 'available', 'running', 'busy'].includes(normalized)) {
+    return 'online'
+  }
+
+  if (['idle', 'away', 'sleeping', 'waiting'].includes(normalized)) {
+    return 'idle'
+  }
+
+  return 'offline'
+}
+
+const normalizeSessionStatus = (value: unknown): Session['status'] => {
+  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : ''
+  if (['pending', 'creating'].includes(normalized)) {
+    return 'pending'
+  }
+
+  if (['closed', 'archived', 'done', 'stopped'].includes(normalized)) {
+    return 'closed'
+  }
+
+  return 'opened'
+}
+
+function normalizeAgentRecord(raw: unknown, fallbackId?: string): Agent | undefined {
+  if (typeof raw === 'string') {
+    return {
+      agentId: raw,
+      label: raw,
+      status: 'online',
+      capabilities: [],
+    }
+  }
+
+  const record = asRecord(raw)
+  if (!record) {
+    const status = normalizeAgentStatus(raw)
+    return fallbackId
+      ? {
+          agentId: fallbackId,
+          label: fallbackId,
+          status,
+          capabilities: [],
+        }
+      : undefined
+  }
+
+  const agentId = asString(pickFirst(record, ['agentId', 'id', 'agent', 'agentKey', 'key']))
+    ?? fallbackId
+  if (!agentId) {
+    return undefined
+  }
+
+  return {
+    agentId,
+    label: asString(pickFirst(record, ['label', 'name', 'displayName', 'title'])) ?? agentId,
+    status: normalizeAgentStatus(pickFirst(record, ['status', 'state', 'presence', 'connectionState', 'connected'])),
+    capabilities: collectStringList(
+      record.capabilities,
+      record.features,
+      record.scopes,
+      record.roles,
+    ),
+  }
+}
+
+function normalizePresencePayload(payload: unknown): Agent[] {
+  const items: Array<{ raw: unknown; fallbackId?: string }> = []
+
+  if (Array.isArray(payload)) {
+    for (const entry of payload) {
+      items.push({ raw: entry })
+    }
+  } else {
+    const record = asRecord(payload)
+    if (!record) {
+      return []
+    }
+
+    const nestedCollection = ['agents', 'items', 'list', 'entries', 'presence']
+      .map((key) => record[key])
+      .find((value) => Array.isArray(value) || Boolean(asRecord(value)))
+
+    if (Array.isArray(nestedCollection)) {
+      for (const entry of nestedCollection) {
+        items.push({ raw: entry })
+      }
+    } else {
+      const nestedRecord = asRecord(nestedCollection)
+      if (nestedRecord) {
+        for (const [key, value] of Object.entries(nestedRecord)) {
+          items.push({ raw: value, fallbackId: key })
+        }
+      } else {
+        for (const [key, value] of Object.entries(record)) {
+          if (['summary', 'meta', 'gateway', 'system', 'status'].includes(key)) {
+            continue
+          }
+
+          items.push({ raw: value, fallbackId: key })
+        }
+      }
+    }
+  }
+
+  const agentsById = new Map<string, Agent>()
+  for (const item of items) {
+    const normalized = normalizeAgentRecord(item.raw, item.fallbackId)
+    if (normalized) {
+      agentsById.set(normalized.agentId, normalized)
+    }
+  }
+
+  return [...agentsById.values()]
+}
+
+function normalizeSessionRecord(raw: unknown, fallbackKey?: string): Session | undefined {
+  if (typeof raw === 'string') {
+    const agentId = inferAgentIdFromSessionKey(raw)
+    if (!agentId) {
+      return undefined
+    }
+
+    return {
+      sessionKey: raw,
+      agentId,
+      updatedAt: new Date().toISOString(),
+      preview: raw,
+      status: 'opened',
+    }
+  }
+
+  const record = asRecord(raw)
+  if (!record) {
+    return undefined
+  }
+
+  const sessionKey = asString(pickFirst(record, ['sessionKey', 'key', 'id'])) ?? fallbackKey
+  if (!sessionKey) {
+    return undefined
+  }
+
+  const agentId = asString(pickFirst(record, ['agentId', 'agent', 'agentKey']))
+    ?? inferAgentIdFromSessionKey(sessionKey)
+  if (!agentId) {
+    return undefined
+  }
+
+  return {
+    sessionKey,
+    agentId,
+    updatedAt: toIsoTimestamp(
+      pickFirst(record, ['updatedAt', 'lastUpdatedAt', 'updated', 'modifiedAt', 'lastActivityAt', 'createdAt', 'ts']),
+    ) ?? new Date().toISOString(),
+    preview: asString(pickFirst(record, ['preview', 'title', 'summary', 'name', 'label'])) ?? sessionKey,
+    status: normalizeSessionStatus(pickFirst(record, ['status', 'state'])),
+  }
+}
+
+function normalizeSessionsPayload(payload: unknown): Session[] {
+  const sessionsByKey = new Map<string, Session>()
+
+  const collect = (value: unknown, fallbackKey?: string) => {
+    const normalized = normalizeSessionRecord(value, fallbackKey)
+    if (normalized) {
+      sessionsByKey.set(normalized.sessionKey, normalized)
+    }
+  }
+
+  if (Array.isArray(payload)) {
+    for (const entry of payload) {
+      collect(entry)
+    }
+  } else {
+    const record = asRecord(payload)
+    if (!record) {
+      return []
+    }
+
+    const nestedCollection = ['sessions', 'items', 'list', 'entries']
+      .map((key) => record[key])
+      .find((value) => Array.isArray(value) || Boolean(asRecord(value)))
+
+    if (Array.isArray(nestedCollection)) {
+      for (const entry of nestedCollection) {
+        collect(entry)
+      }
+    } else {
+      const nestedRecord = asRecord(nestedCollection)
+      if (nestedRecord) {
+        for (const [key, value] of Object.entries(nestedRecord)) {
+          collect(value, key)
+        }
+      } else {
+        for (const [key, value] of Object.entries(record)) {
+          collect(value, key)
+        }
+      }
+    }
+  }
+
+  return [...sessionsByKey.values()].sort((left, right) => {
+    if (left.updatedAt === right.updatedAt) {
+      return left.sessionKey.localeCompare(right.sessionKey)
+    }
+
+    return left.updatedAt > right.updatedAt ? -1 : 1
+  })
+}
+
+function deriveAgentsFromSessions(sessions: Session[], fallbackStatus: Agent['status'] = 'idle'): Agent[] {
+  const agentsById = new Map<string, Agent>()
+
+  for (const session of sessions) {
+    if (!agentsById.has(session.agentId)) {
+      agentsById.set(session.agentId, {
+        agentId: session.agentId,
+        label: session.agentId,
+        status: fallbackStatus,
+        capabilities: [],
+      })
+    }
+  }
+
+  return [...agentsById.values()].sort((left, right) => left.agentId.localeCompare(right.agentId))
+}
+
+function mergeAgents(...groups: Agent[][]): Agent[] {
+  const agentsById = new Map<string, Agent>()
+
+  for (const group of groups) {
+    for (const agent of group) {
+      const existing = agentsById.get(agent.agentId)
+      if (!existing) {
+        agentsById.set(agent.agentId, agent)
+        continue
+      }
+
+      agentsById.set(agent.agentId, {
+        ...existing,
+        ...agent,
+        label: agent.label || existing.label,
+        capabilities: Array.from(new Set([...existing.capabilities, ...agent.capabilities])),
+      })
+    }
+  }
+
+  return [...agentsById.values()].sort((left, right) => left.agentId.localeCompare(right.agentId))
 }
 
 const parsePositiveInt = (value: string | undefined, fallback: number): number => {
@@ -410,6 +770,10 @@ function makeGatewayError(method: string, error?: GatewayErrorShape): Error {
   return new Error(code ? `${message} (${code})` : message)
 }
 
+function isMissingScopeError(error?: GatewayErrorShape): boolean {
+  return Boolean(error?.message?.includes('missing scope'))
+}
+
 export function parseGatewayLogLine(raw: string): LogLine {
   try {
     const payload = JSON.parse(raw) as Record<string, unknown>
@@ -439,6 +803,7 @@ export class GatewayLogsClient {
   private config?: GatewayResolvedConfig
   private requestSeq = 0
   private challengeTimer?: NodeJS.Timeout
+  private systemPresenceUnavailable = false
 
   onConnectionChange(listener: (payload: GatewayConnectionPayload) => void): () => void {
     this.listeners.add(listener)
@@ -471,6 +836,62 @@ export class GatewayLogsClient {
       truncated: parsed.truncated === true,
       reset: parsed.reset === true,
     }
+  }
+
+  async chatSend(params: { sessionKey: string; text: string; agentId?: string }): Promise<ChatSendResult> {
+    const payload = await this.request('chat.send', {
+      sessionKey: params.sessionKey,
+      text: params.text,
+      ...(params.agentId ? { agentId: params.agentId } : {}),
+    })
+
+    const record = asRecord(payload)
+    return {
+      accepted: true,
+      runId: asString(record?.runId) ?? asString(record?.id),
+    }
+  }
+
+  async systemPresence(): Promise<Agent[]> {
+    if (this.systemPresenceUnavailable) {
+      return []
+    }
+
+    const results: Agent[][] = []
+    let lastError: Error | undefined
+
+    for (const method of ['system-presence', 'system.presence']) {
+      try {
+        const payload = await this.request(method)
+        const agents = normalizePresencePayload(payload)
+        if (agents.length > 0) {
+          results.push(agents)
+        }
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error))
+      }
+    }
+
+    if (results.length > 0) {
+      return mergeAgents(...results)
+    }
+
+    if (lastError) {
+      throw lastError
+    }
+
+    return []
+  }
+
+  async sessionsList(agentId?: string): Promise<Session[]> {
+    const payload = await this.request('sessions.list')
+    const sessions = normalizeSessionsPayload(payload)
+
+    if (!agentId) {
+      return sessions
+    }
+
+    return sessions.filter((session) => session.agentId === agentId)
   }
 
   private nextRequestId(prefix: string): string {
@@ -514,6 +935,7 @@ export class GatewayLogsClient {
   private finalizeConnected() {
     this.clearChallengeTimer()
     this.connectRequestId = undefined
+    this.systemPresenceUnavailable = false
     if (this.connectResolve) {
       this.connectResolve()
     }
@@ -585,8 +1007,8 @@ export class GatewayLogsClient {
 
     if (!payload.ok) {
       const error = makeGatewayError('request', payload.error)
-      if (payload.error?.message?.includes('missing scope')) {
-        this.setConnection(false, payload.error.message)
+      if (isMissingScopeError(payload.error) && payload.id.startsWith('system-presence-')) {
+        this.systemPresenceUnavailable = true
       }
       pending.reject(error)
       return
@@ -706,32 +1128,74 @@ export class GatewayLogsClient {
 
 export const gatewayLogsClient = new GatewayLogsClient()
 
+function buildPanelSession(agentId: string, slug: string, preview?: string): Session {
+  return {
+    sessionKey: `agent:${agentId}:panel:${slug}`,
+    agentId,
+    updatedAt: new Date().toISOString(),
+    preview: preview || 'New panel session',
+    status: 'pending',
+  }
+}
+
 export async function bootstrap(): Promise<BootstrapResponse> {
   const connection = gatewayLogsClient.getConnectionSnapshot()
+  let defaultAgentId = 'main'
+
+  try {
+    const agents = await fetchAgents()
+    defaultAgentId = agents[0]?.agentId || defaultAgentId
+  } catch {
+  }
+
   return {
     proxyVersion: '0.1.0',
     gateway: { connected: connection.connected, mode: 'proxy' },
-    defaultAgentId: 'main',
+    defaultAgentId,
     features: { chat: true, logs: true, status: true },
   }
 }
 
 export async function fetchAgents(): Promise<Agent[]> {
-  return mockAgents
+  let agentsFromPresence: Agent[] = []
+  try {
+    agentsFromPresence = await gatewayLogsClient.systemPresence()
+  } catch {
+  }
+
+  const sessions = await gatewayLogsClient.sessionsList()
+  const agentsFromSessions = deriveAgentsFromSessions(sessions, 'idle')
+  return mergeAgents(agentsFromPresence, agentsFromSessions)
 }
 
 export async function fetchAgentSessions(agentId: string): Promise<Session[]> {
-  return mockSessions.filter((session) => session.agentId === agentId)
+  return gatewayLogsClient.sessionsList(agentId)
 }
 
-export function addSession(agentId: string, slug: string, status: Session['status'] = 'pending') {
-  const session: Session = {
-    sessionKey: `agent:${agentId}:panel:${slug}`,
-    agentId,
-    updatedAt: new Date().toISOString(),
-    preview: 'New panel session',
-    status,
+export async function fetchSessions(): Promise<Session[]> {
+  return gatewayLogsClient.sessionsList()
+}
+
+export async function sendChatMessage(params: { sessionKey: string; text: string; agentId?: string }): Promise<ChatSendResult> {
+  return gatewayLogsClient.chatSend(params)
+}
+
+export async function createPanelSession(agentId: string, slug: string, title?: string): Promise<SessionCreateResult> {
+  const sessionKey = `agent:${agentId}:panel:${slug}`
+  const existingSessions = await fetchAgentSessions(agentId)
+  const existing = existingSessions.find((session) => session.sessionKey === sessionKey)
+
+  if (existing) {
+    return {
+      accepted: true,
+      created: false,
+      session: existing,
+    }
   }
-  mockSessions.push(session)
-  return session
+
+  return {
+    accepted: true,
+    created: true,
+    session: buildPanelSession(agentId, slug, title),
+  }
 }

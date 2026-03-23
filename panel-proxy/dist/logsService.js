@@ -149,12 +149,13 @@ function getGatewayConnectionSnapshot() {
     return gatewayClient_1.gatewayLogsClient.getConnectionSnapshot();
 }
 function getLogsStatus() {
+    const liveTailAvailable = state.initialized && !state.lastError;
     return {
         polling: state.polling,
         initialized: state.initialized,
         lastError: state.lastError,
         lastPollAt: state.lastPollAt,
-        connected: gatewayClient_1.gatewayLogsClient.getConnectionSnapshot().connected,
+        connected: liveTailAvailable,
     };
 }
 async function getLogsSnapshot(limit = 100) {

@@ -1,7 +1,7 @@
 import Fastify from 'fastify'
 import fastifyWebsocket from '@fastify/websocket'
 import type WebSocket from 'ws'
-import { addSession, bootstrap, fetchAgents, fetchAgentSessions } from './gatewayClient'
+import { bootstrap, createPanelSession, fetchAgents, fetchAgentSessions, fetchSessions, sendChatMessage } from './gatewayClient'
 import { getLogsSnapshot, getLogsStatus, getGatewayConnectionSnapshot, subscribeSubscriber, unsubscribeSubscriber } from './logsService'
 import { browserWsHub } from './browserWsHub'
 import { AckEnvelope, BrowserCommand, HttpOk, Session, StatusResponse } from './types'
@@ -101,18 +101,26 @@ async function main() {
   })
 
   app.get('/api/status', async () => {
-    const agents = await fetchAgents()
-    const allSessions: Session[] = []
-    for (const a of agents) {
-      const s = await fetchAgentSessions(a.agentId)
-      allSessions.push(...s)
-    }
     const logsStatus = getLogsStatus()
+    let agents: Awaited<ReturnType<typeof fetchAgents>> = []
+    let allSessions: Session[] = []
+    let gatewayConnected = logsStatus.connected
+    let gatewayMessage = logsStatus.lastError || (logsStatus.connected ? 'Live tail available' : 'Logs tail unavailable')
+
+    try {
+      agents = await fetchAgents()
+      allSessions = await fetchSessions()
+      gatewayConnected = getGatewayConnectionSnapshot().connected || agents.length > 0
+    } catch (error) {
+      gatewayConnected = getGatewayConnectionSnapshot().connected
+      gatewayMessage = error instanceof Error ? error.message : gatewayMessage
+    }
+
     const withGateway: StatusResponse = snapshotStatus(agents, allSessions, {
-      gatewayConnected: logsStatus.connected,
+      gatewayConnected,
       logsConnected: logsStatus.connected,
-      lastUpdatedAt: logsStatus.lastPollAt,
-      logsMessage: logsStatus.lastError || (logsStatus.connected ? 'Live tail available' : 'Logs tail unavailable'),
+      lastUpdatedAt: logsStatus.lastPollAt || new Date().toISOString(),
+      logsMessage: gatewayMessage,
     })
     const response: HttpOk<typeof withGateway> = { ok: true, data: withGateway }
     return response
@@ -145,7 +153,7 @@ async function main() {
         ws.send(JSON.stringify(ackError('chat.send', undefined, 'invalid_json', 'Invalid command envelope')))
         return
       }
-      handleEnvelope(ws, message)
+      void handleEnvelope(ws, message)
     })
 
     ws.on('close', () => {
@@ -158,7 +166,7 @@ async function main() {
   console.log(`panel-proxy listening on http://0.0.0.0:${port}`)
 }
 
-function handleEnvelope(ws: WebSocket, envelope: BrowserCommand) {
+async function handleEnvelope(ws: WebSocket, envelope: BrowserCommand) {
   switch (envelope.cmd) {
     case 'chat.send': {
       const text = typeof envelope.payload?.text === 'string'
@@ -166,8 +174,24 @@ function handleEnvelope(ws: WebSocket, envelope: BrowserCommand) {
         : typeof envelope.payload?.message === 'string'
           ? envelope.payload.message
           : ''
+      const sessionKey = typeof envelope.payload?.sessionKey === 'string'
+        ? envelope.payload.sessionKey
+        : typeof envelope.payload?.sessionId === 'string'
+          ? envelope.payload.sessionId
+          : ''
+      const agentId = typeof envelope.payload?.agentId === 'string' ? envelope.payload.agentId : undefined
 
-      ws.send(JSON.stringify(ack('chat.send', envelope.id, { accepted: true, echo: text })))
+      if (!sessionKey || !text.trim()) {
+        ws.send(JSON.stringify(ackError('chat.send', envelope.id, 'invalid_params', 'chat.send requires sessionKey and text')))
+        break
+      }
+
+      try {
+        const result = await sendChatMessage({ agentId, sessionKey, text })
+        ws.send(JSON.stringify(ack('chat.send', envelope.id, result)))
+      } catch (error) {
+        ws.send(JSON.stringify(ackError('chat.send', envelope.id, 'gateway_error', error instanceof Error ? error.message : 'Failed to send chat message')))
+      }
       break
     }
     case 'chat.abort': {
@@ -177,8 +201,14 @@ function handleEnvelope(ws: WebSocket, envelope: BrowserCommand) {
     case 'session.create': {
       const agentId = typeof envelope.payload?.agentId === 'string' ? envelope.payload.agentId : 'main'
       const slug = typeof envelope.payload?.slug === 'string' ? envelope.payload.slug : `session-${Date.now()}`
-      const session = addSession(agentId, slug)
-      ws.send(JSON.stringify(ack('session.create', envelope.id, { accepted: true, session })))
+      const title = typeof envelope.payload?.title === 'string' ? envelope.payload.title : undefined
+
+      try {
+        const result = await createPanelSession(agentId, slug, title)
+        ws.send(JSON.stringify(ack('session.create', envelope.id, result)))
+      } catch (error) {
+        ws.send(JSON.stringify(ackError('session.create', envelope.id, 'gateway_error', error instanceof Error ? error.message : 'Failed to create session')))
+      }
       break
     }
     case 'session.open': {
@@ -187,6 +217,11 @@ function handleEnvelope(ws: WebSocket, envelope: BrowserCommand) {
         : typeof envelope.payload?.sessionId === 'string'
           ? envelope.payload.sessionId
           : ''
+      if (!sessionKey) {
+        ws.send(JSON.stringify(ackError('session.open', envelope.id, 'invalid_params', 'session.open requires sessionKey')))
+        break
+      }
+
       ws.send(JSON.stringify(ack('session.open', envelope.id, { accepted: true, sessionKey })))
       break
     }

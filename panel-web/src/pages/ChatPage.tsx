@@ -50,13 +50,15 @@ export default function ChatPage() {
     [currentSessionId, sessions],
   )
   const currentMessages: Message[] = messagesBySession[currentSessionId] ?? []
+  const currentAgentOffline = currentAgent?.status === 'offline'
 
   useEffect(() => {
     let cancelled = false
 
-    const loadAgents = async () => {
-      setLoadingAgents(true)
-      setPageError(null)
+    const loadAgents = async (options?: { silent?: boolean }) => {
+      if (!options?.silent) {
+        setLoadingAgents(true)
+      }
 
       try {
         const [bootstrap, agents] = await Promise.all([fetchBootstrap(), fetchAgents()])
@@ -65,6 +67,7 @@ export default function ChatPage() {
         }
 
         setAgents(agents, bootstrap.defaultAgentId)
+        setPageError(null)
       } catch (error) {
         if (!cancelled) {
           setPageError(error instanceof Error ? error.message : 'Failed to load agents')
@@ -77,9 +80,13 @@ export default function ChatPage() {
     }
 
     void loadAgents()
+    const intervalId = window.setInterval(() => {
+      void loadAgents({ silent: true })
+    }, 10_000)
 
     return () => {
       cancelled = true
+      window.clearInterval(intervalId)
     }
   }, [setAgents])
 
@@ -90,15 +97,17 @@ export default function ChatPage() {
 
     let cancelled = false
 
-    const loadSessions = async () => {
-      setLoadingSessions(true)
-      setPageError(null)
-      setSessions([])
+    const loadSessions = async (options?: { silent?: boolean }) => {
+      if (!options?.silent) {
+        setLoadingSessions(true)
+        setSessions([])
+      }
 
       try {
         const nextSessions = await fetchSessions(currentAgentId)
         if (!cancelled) {
           setSessions(nextSessions)
+          setPageError(null)
         }
       } catch (error) {
         if (!cancelled) {
@@ -112,15 +121,24 @@ export default function ChatPage() {
     }
 
     void loadSessions()
+    const intervalId = window.setInterval(() => {
+      void loadSessions({ silent: true })
+    }, 10_000)
 
     return () => {
       cancelled = true
+      window.clearInterval(intervalId)
     }
   }, [currentAgentId, setSessions])
 
   const onSend = async () => {
     const trimmed = text.trim()
     if (!trimmed || !currentSessionId) {
+      return
+    }
+
+    if (currentAgentOffline) {
+      setActionError(`Agent ${currentAgent?.name || currentAgentId} is offline`)
       return
     }
 
@@ -135,7 +153,7 @@ export default function ChatPage() {
         sessionKey: currentSessionId,
         text: trimmed,
       })
-      setLastAck('Message accepted by panel-proxy')
+      setLastAck(`Message accepted${currentAgent ? ` for ${currentAgent.name}` : ''}`)
     } catch (error) {
       setActionError(error instanceof Error ? error.message : 'Failed to send message')
     } finally {
@@ -145,6 +163,11 @@ export default function ChatPage() {
 
   const onCreateSession = async () => {
     if (!currentAgentId) {
+      return
+    }
+
+    if (currentAgentOffline) {
+      setActionError(`Agent ${currentAgent?.name || currentAgentId} is offline`)
       return
     }
 
@@ -160,7 +183,7 @@ export default function ChatPage() {
       const created = response.result?.session
       if (created) {
         upsertSession(mapProxySession(created))
-        setLastAck(`Created session ${created.sessionKey}`)
+        setLastAck(`Prepared session ${created.sessionKey}`)
       }
     } catch (error) {
       setActionError(error instanceof Error ? error.message : 'Failed to create session')
@@ -223,7 +246,7 @@ export default function ChatPage() {
             </span>
           </div>
           <span className="pw-muted" style={{ color: '#a5a8c7' }}>
-            {sendPending ? 'Sending...' : 'Live'}
+            {sendPending ? 'Sending...' : currentAgent ? `${currentAgent.name} · ${currentAgent.status}` : 'Live'}
           </span>
         </div>
         {(pageError || actionError || lastAck) && (
@@ -239,7 +262,7 @@ export default function ChatPage() {
           )}
           {currentSessionId && currentMessages.length === 0 && (
             <div className="pw-empty" style={{ color: '#888', padding: 8 }}>
-              This session is connected to panel-proxy. Messages sent from this page are real, but transcript history is still kept locally until the proxy exposes message read APIs.
+              This session is connected to panel-proxy. Sends now go through the real proxy/Gateway path, while transcript history is still local until the proxy exposes message read APIs.
             </div>
           )}
           {currentMessages.map((m: Message) => (
@@ -262,13 +285,13 @@ export default function ChatPage() {
               }
             }}
             placeholder="Type a message..."
-            disabled={!currentSessionId || sendPending}
+            disabled={!currentSessionId || sendPending || currentAgentOffline}
             style={{ flex: 1, padding: '10px 12px', borderRadius: 8, border: '1px solid var(--border)', background: '#0e1220', color: 'white' }}
           />
           <button
             onClick={() => void onSend()}
-            disabled={!currentSessionId || sendPending}
-            style={{ padding: '10px 14px', borderRadius: 8, background: 'var(--primary)', color: 'white', border: 'none', opacity: !currentSessionId || sendPending ? 0.6 : 1 }}
+            disabled={!currentSessionId || sendPending || currentAgentOffline}
+            style={{ padding: '10px 14px', borderRadius: 8, background: 'var(--primary)', color: 'white', border: 'none', opacity: !currentSessionId || sendPending || currentAgentOffline ? 0.6 : 1 }}
           >
             Send
           </button>
@@ -280,8 +303,8 @@ export default function ChatPage() {
           <div className="pw-panel-title" style={{ marginBottom: 0 }}>Sessions</div>
           <button
             onClick={() => void onCreateSession()}
-            disabled={!currentAgentId || createPending}
-            style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'rgba(255,255,255,0.03)', color: 'white', opacity: !currentAgentId || createPending ? 0.6 : 1 }}
+            disabled={!currentAgentId || createPending || currentAgentOffline}
+            style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'rgba(255,255,255,0.03)', color: 'white', opacity: !currentAgentId || createPending || currentAgentOffline ? 0.6 : 1 }}
           >
             {createPending ? 'Creating...' : 'New'}
           </button>
