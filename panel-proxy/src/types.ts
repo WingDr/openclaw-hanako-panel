@@ -1,4 +1,4 @@
-export type AgentStatus = 'online' | 'idle' | 'offline'
+export type AgentStatus = 'online' | 'idle' | 'offline' | 'unknown'
 export type SessionStatus = 'pending' | 'opened' | 'closed'
 
 export type Agent = {

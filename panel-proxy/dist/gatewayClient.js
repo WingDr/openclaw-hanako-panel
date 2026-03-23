@@ -28,8 +28,9 @@ const gatewayRequestTimeoutMs = 10000;
 const gatewayChallengeTimeoutMs = 5000;
 const gatewayClientId = 'gateway-client';
 const gatewayClientMode = 'backend';
-const gatewayDeviceScopes = ['operator.read', 'operator.write'];
+const gatewayDeviceScopes = ['operator.admin', 'operator.read', 'operator.write'];
 const ed25519SpkiPrefix = Buffer.from('302a300506032b6570032100', 'hex');
+const activeActivityThresholdMs = 2 * 60 * 1000;
 const trimToUndefined = (value) => {
     const trimmed = value?.trim();
     return trimmed ? trimmed : undefined;
@@ -220,6 +221,104 @@ function normalizePresencePayload(payload) {
     }
     return [...agentsById.values()];
 }
+function normalizeAgentsListPayload(payload) {
+    const record = asRecord(payload);
+    const rawAgents = Array.isArray(record?.agents) ? record.agents : Array.isArray(payload) ? payload : [];
+    const agentsById = new Map();
+    for (const rawAgent of rawAgents) {
+        const agent = normalizeAgentRecord(rawAgent);
+        if (agent) {
+            agentsById.set(agent.agentId, {
+                ...agent,
+                status: 'unknown',
+            });
+            continue;
+        }
+        const agentRecord = asRecord(rawAgent);
+        const agentId = asString(agentRecord?.id);
+        if (!agentId) {
+            continue;
+        }
+        agentsById.set(agentId, {
+            agentId,
+            label: asString(agentRecord?.name) ?? agentId,
+            status: 'unknown',
+            capabilities: [],
+        });
+    }
+    return [...agentsById.values()].sort((left, right) => left.agentId.localeCompare(right.agentId));
+}
+function normalizeStatusPayloadAgents(payload) {
+    const record = asRecord(payload);
+    if (!record) {
+        return [];
+    }
+    const activityByAgent = new Map();
+    const sessionsByAgent = Array.isArray(asRecord(record.sessions)?.byAgent)
+        ? asRecord(record.sessions)?.byAgent
+        : [];
+    for (const item of sessionsByAgent) {
+        const itemRecord = asRecord(item);
+        const agentId = asString(itemRecord?.agentId);
+        if (!agentId) {
+            continue;
+        }
+        const recentSessions = Array.isArray(itemRecord?.recent) ? itemRecord.recent : [];
+        for (const recentSession of recentSessions) {
+            const recentRecord = asRecord(recentSession);
+            const updatedAtMs = asFiniteNumber(recentRecord?.updatedAt);
+            if (updatedAtMs !== undefined) {
+                activityByAgent.set(agentId, Math.max(activityByAgent.get(agentId) ?? updatedAtMs, updatedAtMs));
+            }
+        }
+    }
+    const rawAgents = Array.isArray(record.agents)
+        ? record.agents
+        : Array.isArray(asRecord(record.heartbeat)?.agents)
+            ? asRecord(record.heartbeat)?.agents
+            : [];
+    const nowMs = Date.now();
+    const agentsById = new Map();
+    for (const rawAgent of rawAgents) {
+        const agentRecord = asRecord(rawAgent);
+        if (!agentRecord) {
+            continue;
+        }
+        const agentId = asString(pickFirst(agentRecord, ['agentId', 'id']));
+        if (!agentId) {
+            continue;
+        }
+        const directRecentSessions = Array.isArray(asRecord(agentRecord.sessions)?.recent)
+            ? asRecord(agentRecord.sessions)?.recent
+            : [];
+        let latestActivityMs = activityByAgent.get(agentId);
+        for (const recentSession of directRecentSessions) {
+            const recentRecord = asRecord(recentSession);
+            const updatedAtMs = asFiniteNumber(recentRecord?.updatedAt);
+            if (updatedAtMs !== undefined) {
+                latestActivityMs = Math.max(latestActivityMs ?? updatedAtMs, updatedAtMs);
+            }
+        }
+        const heartbeatEnabled = asBoolean(asRecord(agentRecord.heartbeat)?.enabled) === true
+            || asBoolean(agentRecord.enabled) === true;
+        const ageMs = latestActivityMs !== undefined ? Math.max(0, nowMs - latestActivityMs) : undefined;
+        const hasSeenActivity = latestActivityMs !== undefined || directRecentSessions.length > 0;
+        let status = 'offline';
+        if (ageMs !== undefined && ageMs <= activeActivityThresholdMs) {
+            status = 'online';
+        }
+        else if (hasSeenActivity || heartbeatEnabled) {
+            status = 'idle';
+        }
+        agentsById.set(agentId, {
+            agentId,
+            label: asString(pickFirst(agentRecord, ['name', 'label', 'displayName'])) ?? agentId,
+            status,
+            capabilities: [],
+        });
+    }
+    return [...agentsById.values()].sort((left, right) => left.agentId.localeCompare(right.agentId));
+}
 function normalizeSessionRecord(raw, fallbackKey) {
     if (typeof raw === 'string') {
         const agentId = inferAgentIdFromSessionKey(raw);
@@ -302,7 +401,7 @@ function normalizeSessionsPayload(payload) {
         return left.updatedAt > right.updatedAt ? -1 : 1;
     });
 }
-function deriveAgentsFromSessions(sessions, fallbackStatus = 'idle') {
+function deriveAgentsFromSessions(sessions, fallbackStatus = 'unknown') {
     const agentsById = new Map();
     for (const session of sessions) {
         if (!agentsById.has(session.agentId)) {
@@ -325,10 +424,16 @@ function mergeAgents(...groups) {
                 agentsById.set(agent.agentId, agent);
                 continue;
             }
+            const existingHasCustomLabel = existing.label.trim() !== existing.agentId.trim();
+            const nextHasCustomLabel = agent.label.trim() !== agent.agentId.trim();
+            const mergedStatus = agent.status === 'unknown' && existing.status !== 'unknown'
+                ? existing.status
+                : agent.status;
             agentsById.set(agent.agentId, {
                 ...existing,
                 ...agent,
-                label: agent.label || existing.label,
+                label: nextHasCustomLabel || !existingHasCustomLabel ? agent.label || existing.label : existing.label,
+                status: mergedStatus,
                 capabilities: Array.from(new Set([...existing.capabilities, ...agent.capabilities])),
             });
         }
@@ -581,6 +686,9 @@ function makeGatewayError(method, error) {
 function isMissingScopeError(error) {
     return Boolean(error?.message?.includes('missing scope'));
 }
+function isUnknownMethodError(error) {
+    return Boolean(error?.message?.includes('unknown method'));
+}
 function parseGatewayLogLine(raw) {
     try {
         const payload = JSON.parse(raw);
@@ -605,6 +713,7 @@ class GatewayLogsClient {
         this.connection = makeConnectionPayload(false, 'Gateway logs client idle');
         this.requestSeq = 0;
         this.systemPresenceUnavailable = false;
+        this.unsupportedMethods = new Set();
     }
     onConnectionChange(listener) {
         this.listeners.add(listener);
@@ -653,6 +762,9 @@ class GatewayLogsClient {
         const results = [];
         let lastError;
         for (const method of ['system-presence', 'system.presence']) {
+            if (this.unsupportedMethods.has(method)) {
+                continue;
+            }
             try {
                 const payload = await this.request(method);
                 const agents = normalizePresencePayload(payload);
@@ -661,6 +773,9 @@ class GatewayLogsClient {
                 }
             }
             catch (error) {
+                if (error instanceof Error && error.message.includes('unknown method')) {
+                    this.unsupportedMethods.add(method);
+                }
                 lastError = error instanceof Error ? error : new Error(String(error));
             }
         }
@@ -671,6 +786,14 @@ class GatewayLogsClient {
             throw lastError;
         }
         return [];
+    }
+    async agentsList() {
+        const payload = await this.request('agents.list');
+        return normalizeAgentsListPayload(payload);
+    }
+    async statusAgents() {
+        const payload = await this.request('status');
+        return normalizeStatusPayloadAgents(payload);
     }
     async sessionsList(agentId) {
         const payload = await this.request('sessions.list');
@@ -717,6 +840,7 @@ class GatewayLogsClient {
         this.clearChallengeTimer();
         this.connectRequestId = undefined;
         this.systemPresenceUnavailable = false;
+        this.unsupportedMethods.clear();
         if (this.connectResolve) {
             this.connectResolve();
         }
@@ -783,6 +907,9 @@ class GatewayLogsClient {
             const error = makeGatewayError('request', payload.error);
             if (isMissingScopeError(payload.error) && payload.id.startsWith('system-presence-')) {
                 this.systemPresenceUnavailable = true;
+            }
+            if (isUnknownMethodError(payload.error) && payload.id.startsWith('system-presence-')) {
+                this.unsupportedMethods.add('system.presence');
             }
             pending.reject(error);
             return;
@@ -908,15 +1035,21 @@ async function bootstrap() {
     };
 }
 async function fetchAgents() {
-    let agentsFromPresence = [];
+    let agentsFromCatalog = [];
+    let agentsFromStatus = [];
     try {
-        agentsFromPresence = await exports.gatewayLogsClient.systemPresence();
+        agentsFromCatalog = await exports.gatewayLogsClient.agentsList();
+    }
+    catch {
+    }
+    try {
+        agentsFromStatus = await exports.gatewayLogsClient.statusAgents();
     }
     catch {
     }
     const sessions = await exports.gatewayLogsClient.sessionsList();
-    const agentsFromSessions = deriveAgentsFromSessions(sessions, 'idle');
-    return mergeAgents(agentsFromPresence, agentsFromSessions);
+    const agentsFromSessions = deriveAgentsFromSessions(sessions, 'unknown');
+    return mergeAgents(agentsFromCatalog, agentsFromStatus, agentsFromSessions);
 }
 async function fetchAgentSessions(agentId) {
     return exports.gatewayLogsClient.sessionsList(agentId);

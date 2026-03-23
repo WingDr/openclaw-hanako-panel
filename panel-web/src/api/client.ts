@@ -1,6 +1,6 @@
 import { createPanelApiUrl, panelApiBaseUrl } from '../config'
 
-export type AgentStatus = 'online' | 'idle' | 'offline'
+export type AgentStatus = 'online' | 'idle' | 'offline' | 'unknown'
 export type SessionStatus = 'pending' | 'opened' | 'closed'
 export type ChannelStatus = 'connected' | 'disconnected'
 export type LogLevel = 'info' | 'warning' | 'error'

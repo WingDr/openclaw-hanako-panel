@@ -78,7 +78,7 @@ export default function StatusPage() {
         {status?.agents.map((agent) => (
           <div key={agent.id} style={{ display: 'flex', justifyContent: 'space-between', margin: '6px 0' }}>
             <span>{agent.name}</span>
-            <span style={{ color: agent.status === 'online' ? '#4ade80' : agent.status === 'idle' ? '#fbbf24' : '#f472b6' }}>{agent.status}</span>
+            <span style={{ color: agent.status === 'online' ? '#4ade80' : agent.status === 'idle' ? '#fbbf24' : agent.status === 'offline' ? '#f472b6' : '#94a3b8' }}>{agent.status}</span>
           </div>
         ))}
       </section>

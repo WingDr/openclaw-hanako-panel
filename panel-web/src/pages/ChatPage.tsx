@@ -16,6 +16,7 @@ const statusColor: Record<string, string> = {
   online: '#4ade80',
   idle: '#fbbf24',
   offline: '#888',
+  unknown: '#94a3b8',
   pending: '#fbbf24',
   opened: '#60a5fa',
   closed: '#a1a1aa',
@@ -231,7 +232,7 @@ export default function ChatPage() {
               <span style={{ color: statusColor[agent.status] }}>{agent.status}</span>
             </div>
             <div style={{ color: '#93a1c6', fontSize: 12 }}>
-              {agent.capabilities.join(' / ') || 'No capabilities'}
+              {agent.capabilities.join(' / ') || (agent.status === 'unknown' ? 'Presence not exposed by Gateway' : 'No capabilities')}
             </div>
           </button>
         ))}
