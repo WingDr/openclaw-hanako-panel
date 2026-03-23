@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react'
-import { fetchAgents, fetchBootstrap, fetchSessions, formatRelativeTime, mapProxySession } from '../api/client'
+import React, { useMemo, useState } from 'react'
+import { formatRelativeTime, mapProxySession } from '../api/client'
 import { panelRealtime } from '../realtime/ws'
 import { useChatStore } from '../store'
 import type { Message } from '../store'
@@ -28,18 +28,11 @@ export default function ChatPage() {
   const currentSessionId = useChatStore((state) => state.currentSessionId)
   const sessions = useChatStore((state) => state.sessions)
   const messagesBySession = useChatStore((state) => state.messagesBySession)
-  const setAgents = useChatStore((state) => state.setAgents)
-  const setCurrentAgentId = useChatStore((state) => state.setCurrentAgentId)
-  const setSessions = useChatStore((state) => state.setSessions)
   const upsertSession = useChatStore((state) => state.upsertSession)
   const addUserMessage = useChatStore((state) => state.addUserMessage)
-  const setSessionId = useChatStore((state) => state.setSessionId)
   const [text, setText] = useState('')
-  const [loadingAgents, setLoadingAgents] = useState(true)
-  const [loadingSessions, setLoadingSessions] = useState(false)
   const [createPending, setCreatePending] = useState(false)
   const [sendPending, setSendPending] = useState(false)
-  const [pageError, setPageError] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [lastAck, setLastAck] = useState<string | null>(null)
   const currentAgent = useMemo(
@@ -53,85 +46,6 @@ export default function ChatPage() {
   const currentMessages: Message[] = messagesBySession[currentSessionId] ?? []
   const currentAgentOffline = currentAgent?.status === 'offline'
 
-  useEffect(() => {
-    let cancelled = false
-
-    const loadAgents = async (options?: { silent?: boolean }) => {
-      if (!options?.silent) {
-        setLoadingAgents(true)
-      }
-
-      try {
-        const [bootstrap, agents] = await Promise.all([fetchBootstrap(), fetchAgents()])
-        if (cancelled) {
-          return
-        }
-
-        setAgents(agents, bootstrap.defaultAgentId)
-        setPageError(null)
-      } catch (error) {
-        if (!cancelled) {
-          setPageError(error instanceof Error ? error.message : 'Failed to load agents')
-        }
-      } finally {
-        if (!cancelled) {
-          setLoadingAgents(false)
-        }
-      }
-    }
-
-    void loadAgents()
-    const intervalId = window.setInterval(() => {
-      void loadAgents({ silent: true })
-    }, 10_000)
-
-    return () => {
-      cancelled = true
-      window.clearInterval(intervalId)
-    }
-  }, [setAgents])
-
-  useEffect(() => {
-    if (!currentAgentId) {
-      return
-    }
-
-    let cancelled = false
-
-    const loadSessions = async (options?: { silent?: boolean }) => {
-      if (!options?.silent) {
-        setLoadingSessions(true)
-        setSessions([])
-      }
-
-      try {
-        const nextSessions = await fetchSessions(currentAgentId)
-        if (!cancelled) {
-          setSessions(nextSessions)
-          setPageError(null)
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setPageError(error instanceof Error ? error.message : 'Failed to load sessions')
-        }
-      } finally {
-        if (!cancelled) {
-          setLoadingSessions(false)
-        }
-      }
-    }
-
-    void loadSessions()
-    const intervalId = window.setInterval(() => {
-      void loadSessions({ silent: true })
-    }, 10_000)
-
-    return () => {
-      cancelled = true
-      window.clearInterval(intervalId)
-    }
-  }, [currentAgentId, setSessions])
-
   const onSend = async () => {
     const trimmed = text.trim()
     if (!trimmed || !currentSessionId) {
@@ -143,6 +57,7 @@ export default function ChatPage() {
       return
     }
 
+    setLastAck(null)
     setText('')
     setActionError(null)
     addUserMessage(currentSessionId, trimmed)
@@ -175,6 +90,7 @@ export default function ChatPage() {
     const slug = `panel-${Date.now().toString(36)}`
     setCreatePending(true)
     setActionError(null)
+    setLastAck(null)
 
     try {
       const response = await panelRealtime.sendCommand<{ accepted?: boolean; session?: CreatedSession }>('session.create', {
@@ -193,152 +109,124 @@ export default function ChatPage() {
     }
   }
 
-  const onSelectSession = (sessionId: string) => {
-    setSessionId(sessionId)
-    setActionError(null)
-    void panelRealtime.sendCommand('session.open', { sessionKey: sessionId }).catch((error) => {
-      setActionError(error instanceof Error ? error.message : 'Failed to open session')
-    })
-  }
-
   return (
-    <div className="pw-chat-layout" style={{ display: 'grid', gridTemplateColumns: '260px 1fr 320px', gap: '16px', height: '100%', paddingRight: 8 }}>
-      <section className="pw-panel pw-agent-panel" aria-label="Agents list" style={{ background: 'var(--surface)', borderRadius: '8px', padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <div className="pw-panel-title">Agents</div>
-        {loadingAgents && <div className="pw-empty" style={{ color: '#888', padding: 8 }}>Loading agents...</div>}
-        {!loadingAgents && agents.length === 0 && (
-          <div className="pw-empty" style={{ color: '#888', padding: 8 }}>No agents returned by panel-proxy.</div>
-        )}
-        {agents.map((agent) => (
-          <button
-            key={agent.id}
-            className="pw-agent-item"
-            onClick={() => setCurrentAgentId(agent.id)}
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 4,
-              padding: '8px 10px',
-              borderRadius: 6,
-              border: '1px solid transparent',
-              background: agent.id === currentAgentId ? 'rgba(124, 58, 237, 0.18)' : 'rgba(255,255,255,0.02)',
-              color: 'inherit',
-              cursor: 'pointer',
-              textAlign: 'left',
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-              <span style={{ fontFamily: 'system-ui, sans-serif' }}>{agent.name}</span>
-              <span style={{ color: statusColor[agent.status] }}>{agent.status}</span>
-            </div>
-            <div style={{ color: '#93a1c6', fontSize: 12 }}>
-              {agent.capabilities.join(' / ') || (agent.status === 'unknown' ? 'Presence not exposed by Gateway' : 'No capabilities')}
-            </div>
-          </button>
-        ))}
-      </section>
-
-      <section className="pw-workspace" aria-label="Chat workspace" style={{ background: 'var(--surface)', borderRadius: '8px', padding: 12, display: 'flex', flexDirection: 'column', height: '100%' }}>
-        <div className="pw-workspace-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <strong>{currentSession?.name || 'No session selected'}</strong>
-            <span className="pw-muted" style={{ color: '#a5a8c7', fontSize: 12 }}>
-              {currentSessionId || 'Select or create a session to start chatting'}
-            </span>
-          </div>
-          <span className="pw-muted" style={{ color: '#a5a8c7' }}>
-            {sendPending ? 'Sending...' : currentAgent ? `${currentAgent.name} · ${currentAgent.status}` : 'Live'}
-          </span>
+    <div className="pw-chat-page">
+      <header className="pw-chat-hero">
+        <div>
+          <p className="pw-section-kicker">Chat workspace</p>
+          <h1>{currentSession?.name || 'No session selected'}</h1>
+          <p className="pw-muted-copy">
+            {currentSessionId || 'Pick an agent session from the left rail to start chatting.'}
+          </p>
         </div>
-        {(pageError || actionError || lastAck) && (
-          <div style={{ marginBottom: 8, padding: '8px 10px', borderRadius: 8, background: 'rgba(255,255,255,0.04)', color: pageError || actionError ? '#fca5a5' : '#93c5fd' }}>
-            {pageError || actionError || lastAck}
+        <div className="pw-chat-actions">
+          <div className="pw-chat-presence">
+            <span className="pw-presence-dot" style={{ backgroundColor: statusColor[currentAgent?.status || 'unknown'] }} />
+            <span>{sendPending ? 'Sending...' : currentAgent ? `${currentAgent.name} · ${currentAgent.status}` : 'Waiting for agent'}</span>
           </div>
-        )}
-        <div className="pw-messages" style={{ flex: 1, overflow: 'auto', padding: '6px 0' }}>
+          <button
+            className="pw-primary-button"
+            onClick={() => void onCreateSession()}
+            disabled={!currentAgentId || createPending || currentAgentOffline}
+          >
+            {createPending ? 'Creating session...' : 'New session'}
+          </button>
+        </div>
+      </header>
+
+      {(actionError || lastAck) && (
+        <div className={actionError ? 'pw-error-banner' : 'pw-info-banner'}>
+          {actionError || lastAck}
+        </div>
+      )}
+
+      <section className="pw-chat-surface" aria-label="Chat workspace">
+        <div className="pw-message-stream">
           {!currentSessionId && (
-            <div className="pw-empty" style={{ color: '#888', padding: 8 }}>
+            <div className="pw-empty-state">
               No session available for the selected agent yet.
             </div>
           )}
           {currentSessionId && currentMessages.length === 0 && (
-            <div className="pw-empty" style={{ color: '#888', padding: 8 }}>
+            <div className="pw-empty-state">
               This session is connected to panel-proxy. Sends now go through the real proxy/Gateway path, while transcript history is still local until the proxy exposes message read APIs.
             </div>
           )}
           {currentMessages.map((m: Message) => (
-            <div key={m.id} className="pw-message" style={{ display: 'flex', margin: '6px 0', justifyContent: m.author === 'agent' ? 'flex-start' : 'flex-end' }}>
-              <div style={{ maxWidth: '80%', padding: '8px 12px', borderRadius: 10, background: m.author === 'agent' ? '#1f2a44' : '#1a2b4a', color: '#e8eaff' }}>
-                <div style={{ fontSize: 12, opacity: 0.8 }}>{m.timestamp}</div>
-                <div style={{ fontFamily: 'system-ui, sans-serif' }}>{m.text}</div>
+            <div key={m.id} className={`pw-message-row ${m.author === 'agent' ? 'is-agent' : 'is-user'}`}>
+              <div className={`pw-message-bubble ${m.author === 'agent' ? 'is-agent' : 'is-user'}`}>
+                <div className="pw-message-meta">
+                  <span>{m.author === 'agent' ? currentAgent?.name || 'Agent' : 'You'}</span>
+                  <span>{m.timestamp}</span>
+                </div>
+                <div className="pw-message-text">{m.text}</div>
               </div>
             </div>
           ))}
         </div>
-        <div className="pw-input" style={{ display: 'flex', gap: 8, alignItems: 'center', paddingTop: 8 }}>
-          <input
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault()
-                void onSend()
-              }
-            }}
-            placeholder="Type a message..."
-            disabled={!currentSessionId || sendPending || currentAgentOffline}
-            style={{ flex: 1, padding: '10px 12px', borderRadius: 8, border: '1px solid var(--border)', background: '#0e1220', color: 'white' }}
-          />
-          <button
-            onClick={() => void onSend()}
-            disabled={!currentSessionId || sendPending || currentAgentOffline}
-            style={{ padding: '10px 14px', borderRadius: 8, background: 'var(--primary)', color: 'white', border: 'none', opacity: !currentSessionId || sendPending || currentAgentOffline ? 0.6 : 1 }}
-          >
-            Send
-          </button>
+
+        <div className="pw-input-shell">
+          <div className="pw-input-meta">
+            <span>{currentAgent ? `${currentAgent.name} is ready` : 'Select an agent to continue'}</span>
+            <span>{currentSession?.updated || formatRelativeTime(currentSession?.updatedAt) || 'Fresh session'}</span>
+          </div>
+          <div className="pw-input-row">
+            <input
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  void onSend()
+                }
+              }}
+              placeholder="Type a message to the selected agent..."
+              disabled={!currentSessionId || sendPending || currentAgentOffline}
+              className="pw-chat-input"
+            />
+            <button
+              className="pw-primary-button"
+              onClick={() => void onSend()}
+              disabled={!currentSessionId || sendPending || currentAgentOffline}
+            >
+              Send
+            </button>
+          </div>
         </div>
       </section>
 
-      <section className="pw-panel pw-chair-panel" aria-label="Sessions" style={{ background: 'var(--surface)', borderRadius: 8, padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
-          <div className="pw-panel-title" style={{ marginBottom: 0 }}>Sessions</div>
-          <button
-            onClick={() => void onCreateSession()}
-            disabled={!currentAgentId || createPending || currentAgentOffline}
-            style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'rgba(255,255,255,0.03)', color: 'white', opacity: !currentAgentId || createPending || currentAgentOffline ? 0.6 : 1 }}
-          >
-            {createPending ? 'Creating...' : 'New'}
-          </button>
+      <section className="pw-session-summary">
+        <div className="pw-card-heading">
+          <div>
+            <p className="pw-section-kicker">Session notes</p>
+            <h2>Current conversation context</h2>
+          </div>
         </div>
-        {loadingSessions && <div className="pw-empty" style={{ color: '#888', padding: 8 }}>Loading sessions...</div>}
-        {!loadingSessions && sessions.length === 0 && currentAgentId && (
-          <div className="pw-empty" style={{ color: '#888', padding: 8 }}>No sessions for this agent yet.</div>
-        )}
-        {sessions.map((session) => (
-          <button
-            key={session.id}
-            className="pw-session-item"
-            onClick={() => onSelectSession(session.id)}
-            style={{
-              padding: '8px 10px',
-              borderRadius: 6,
-              cursor: 'pointer',
-              border: '1px solid transparent',
-              background: session.id === currentSessionId ? 'rgba(124, 58, 237, 0.18)' : 'rgba(255,255,255,0.02)',
-              color: 'inherit',
-              textAlign: 'left',
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-              <span>{session.name}</span>
-              <span style={{ color: '#9aa3ff', fontSize: 12 }}>{session.updated ?? formatRelativeTime(session.updatedAt) ?? ''}</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 4 }}>
-              <span style={{ color: '#7dd3fc', fontSize: 12 }}>{session.agentId}</span>
-              <span style={{ color: statusColor[session.status || 'pending'], fontSize: 12 }}>{session.status || 'pending'}</span>
-            </div>
-          </button>
-        ))}
+        <div className="pw-session-facts">
+          <div className="pw-fact-row">
+            <span>Agent</span>
+            <strong>{currentAgent?.name || 'Not selected'}</strong>
+          </div>
+          <div className="pw-fact-row">
+            <span>Status</span>
+            <strong>{currentAgent?.status || 'unknown'}</strong>
+          </div>
+          <div className="pw-fact-row">
+            <span>Session key</span>
+            <strong>{currentSessionId || 'Not opened yet'}</strong>
+          </div>
+          <div className="pw-fact-row">
+            <span>Messages</span>
+            <strong>{currentMessages.length}</strong>
+          </div>
+          <div className="pw-fact-row">
+            <span>Updated</span>
+            <strong>{currentSession?.updated || formatRelativeTime(currentSession?.updatedAt) || '--'}</strong>
+          </div>
+        </div>
+        <div className="pw-inline-note">
+          Channel sessions are intentionally hidden from the left tree. This workspace focuses only on agent conversation sessions.
+        </div>
       </section>
     </div>
   )

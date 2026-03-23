@@ -2,8 +2,7 @@ import React from 'react'
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom'
 import Shell from './components/Shell'
 import ChatPage from './pages/ChatPage'
-import LogsPage from './pages/LogsPage'
-import StatusPage from './pages/StatusPage'
+import ManagePage from './pages/ManagePage'
 
 function DashboardLayout() {
   return (
@@ -17,10 +16,11 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<DashboardLayout />}> 
+        <Route path="/" element={<DashboardLayout />}>
           <Route path="chat" element={<ChatPage />} />
-          <Route path="logs" element={<LogsPage />} />
-          <Route path="status" element={<StatusPage />} />
+          <Route path="manage" element={<ManagePage />} />
+          <Route path="logs" element={<Navigate to="/manage" replace />} />
+          <Route path="status" element={<Navigate to="/manage" replace />} />
           <Route index element={<Navigate to="/chat" />} />
         </Route>
         <Route path="*" element={<Navigate to="/chat" />} />

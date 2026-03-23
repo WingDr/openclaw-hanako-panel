@@ -40,19 +40,43 @@ export default function LogsPage() {
   const [autoFollow, setAutoFollow] = useState(true)
   const logListRef = useRef<HTMLDivElement | null>(null)
   const previousFilteredLogCountRef = useRef(0)
+  const scrollIgnoreUntilRef = useRef(0)
+  const scrollFrameRef = useRef<number | null>(null)
 
-  const scrollToBottom = (behavior: ScrollBehavior = 'auto') => {
-    const element = logListRef.current
-    if (!element) {
-      return
+  const scrollToBottom = () => {
+    if (scrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(scrollFrameRef.current)
     }
 
-    element.scrollTo({ top: element.scrollHeight, behavior })
+    scrollFrameRef.current = window.requestAnimationFrame(() => {
+      const element = logListRef.current
+      if (!element) {
+        return
+      }
+
+      scrollIgnoreUntilRef.current = Date.now() + 180
+      element.scrollTop = element.scrollHeight
+
+      window.requestAnimationFrame(() => {
+        const nextElement = logListRef.current
+        if (!nextElement) {
+          return
+        }
+
+        if (isNearBottom(nextElement)) {
+          setAutoFollow(true)
+        }
+      })
+    })
   }
 
   const updateAutoFollow = () => {
     const element = logListRef.current
     if (!element) {
+      return
+    }
+
+    if (Date.now() < scrollIgnoreUntilRef.current) {
       return
     }
 
@@ -117,6 +141,9 @@ export default function LogsPage() {
 
     return () => {
       cancelled = true
+      if (scrollFrameRef.current !== null) {
+        window.cancelAnimationFrame(scrollFrameRef.current)
+      }
       unsubscribe()
       void panelRealtime.sendCommand('logs.unsubscribe', {}).catch(() => {})
     }
@@ -142,8 +169,7 @@ export default function LogsPage() {
       return
     }
 
-    const behavior: ScrollBehavior = previousCount > 0 && filteredLogs.length > previousCount ? 'smooth' : 'auto'
-    scrollToBottom(behavior)
+    scrollToBottom()
   }, [autoFollow, filteredLogs.length])
 
   return (
@@ -164,8 +190,8 @@ export default function LogsPage() {
         {!autoFollow && (
           <button
             onClick={() => {
-              scrollToBottom('smooth')
               setAutoFollow(true)
+              scrollToBottom()
             }}
             style={{ padding: '8px 12px', borderRadius: 6, border: '1px solid var(--border)', background: 'rgba(255,255,255,0.06)', color: 'white' }}
           >

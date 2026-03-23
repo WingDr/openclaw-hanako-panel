@@ -22,6 +22,23 @@
 
 目标产物是一个更适合长期与 agent 协作的 panel：既能聊天工作，也能查看状态与日志，并逐步扩展到更完整的管理视图。
 
+## 参考项目
+
+当前仓库的产品与界面方向主要参考下面几个项目，但不会直接照搬它们的 runtime 或内部状态模型：
+
+- `liliMozi/openhanako`：工作台氛围、三栏工作区气质、chat 区视觉语言
+  - <https://github.com/liliMozi/openhanako>
+- `ClawPanel`：管理面板维度与运维信息覆盖面
+- `openclaw-dashboard`：管理区的信息组织方式
+- OpenClaw 官方 Control UI / Gateway WebSocket：真实能力边界与数据权威来源
+
+更准确地说：
+
+- **视觉与工作台体验** 借 `openhanako`
+- **管理面板覆盖面** 借 `ClawPanel` / `openclaw-dashboard`
+- **实时数据链路** 以 OpenClaw Gateway 为准
+- **agent 独立 session 工作区** 是本项目自己强调的核心卖点
+
 ## 当前稳定方向
 
 根据 `docs/` 中已经整理过的结论，目前可以把下面这些视为稳定前提：
@@ -160,12 +177,37 @@
 - 所有实时能力走一条浏览器 WebSocket
 - logs 由 proxy 通过 `logs.tail` 增量拉取后转推
 
-## 建议页面结构
+## 当前前端基础路由
 
-完整方向建议保持：
+当前 `panel-web` 已经收束到一个统一工作台壳层，主入口只有两条：
 
 ```text
 /chat
+/manage
+```
+
+### `/chat`
+
+- 三栏工作台布局
+- 左侧：agent 列表，以及展开后的对话 session 列表
+- 中间：当前 chat 工作区
+- 右侧：预留扩展栏
+- 顶部：居中的 `Chat / Manage panel` 主切换
+
+### `/manage`
+
+- 全宽单栏管理页，不显示左右侧栏
+- 顶部保留摘要卡片
+- 页面内部再切 `Status / Logs`
+- `Status` 对应 `Gateway and workspace snapshot`
+- `Logs` 对应 `Realtime proxy stream`
+- 日志流在独立滚动容器中显示，不会把整页无限撑长
+
+## 后续管理区扩展方向
+
+如果后续继续扩管理区，仍建议围绕 `/manage` 扩，而不是回到分散的顶级页面：
+
+```text
 /manage/overview
 /manage/agents
 /manage/sessions
@@ -175,14 +217,6 @@
 /manage/skills
 /manage/channels
 /manage/models
-```
-
-如果先严格按 首版 收缩，最小版本可以先落成：
-
-```text
-/chat
-/logs
-/status
 ```
 
 ## 推荐开发顺序
@@ -264,7 +298,7 @@ OPENCLAW_LOGS_MAX_BYTES=250000
 
 只有当 `panel-web` 和 `panel-proxy` 不在同一台机器上时，才需要显式填写这两个变量。
 
-`/logs` 页的数据来源是 OpenClaw Gateway 的 `logs.tail`，不是 `panel-proxy` 自己的控制台输出。
+`/manage` 里的 `Logs` 子页数据来源是 OpenClaw Gateway 的 `logs.tail`，不是 `panel-proxy` 自己的控制台输出。
 如果 `OPENCLAW_GATEWAY_*` 没有显式填写，`panel-proxy` 会优先尝试从同机的 `~/.openclaw/openclaw.json` 推导本地 Gateway 地址和 token。
 
 ### 3. 一条命令同时启动
