@@ -12,13 +12,14 @@ export type Message = {
 type State = {
   agents: AgentSummary[]
   currentAgentId: string
-  sessions: ChatSession[]
+  sessionsByAgent: Record<string, ChatSession[]>
   currentSessionId: string
   messagesBySession: Record<string, Message[]>
   setAgents: (agents: AgentSummary[], preferredAgentId?: string) => void
   setCurrentAgentId: (id: string) => void
-  setSessions: (sessions: ChatSession[]) => void
-  upsertSession: (session: ChatSession) => void
+  replaceAgentSessions: (agentId: string, sessions: ChatSession[]) => void
+  upsertAgentSession: (session: ChatSession) => void
+  markSessionOpened: (sessionId: string, updatedAt?: string) => void
   setSessionId: (id: string) => void
   setSessionMessages: (sessionId: string, messages: Message[]) => void
   addUserMessage: (sessionId: string, text: string) => void
@@ -51,6 +52,45 @@ const mergeSessionMessages = (history: Message[], existing: Message[]): Message[
   return merged
 }
 
+const resolveCurrentSessionId = (currentSessionId: string, sessions: ChatSession[]): string => (
+  sessions.some((session) => session.id === currentSessionId)
+    ? currentSessionId
+    : sessions[0]?.id || ''
+)
+
+const sortSessions = (sessions: ChatSession[]): ChatSession[] => sessions
+  .slice()
+  .sort((left, right) => {
+    const leftUpdatedAt = left.updatedAt || ''
+    const rightUpdatedAt = right.updatedAt || ''
+
+    if (leftUpdatedAt === rightUpdatedAt) {
+      return left.id.localeCompare(right.id)
+    }
+
+    return leftUpdatedAt > rightUpdatedAt ? -1 : 1
+  })
+
+const isHanakoPanelSession = (session: ChatSession, agentId: string): boolean => (
+  session.agentId === agentId && session.id.startsWith(`agent:${agentId}:hanako-panel:`)
+)
+
+const mergeAgentSessions = (agentId: string, remoteSessions: ChatSession[], localSessions: ChatSession[]): ChatSession[] => {
+  const mergedById = new Map<string, ChatSession>()
+
+  for (const session of remoteSessions) {
+    mergedById.set(session.id, session)
+  }
+
+  for (const session of localSessions) {
+    if (!mergedById.has(session.id) && isHanakoPanelSession(session, agentId)) {
+      mergedById.set(session.id, session)
+    }
+  }
+
+  return sortSessions([...mergedById.values()])
+}
+
 export const useChatStore = create<State>((set) => {
   const appendMessage = (state: State, sessionId: string, author: Message['author'], text: string) => {
     const message: Message = { id: messageId(), sessionId, author, text, timestamp: now() }
@@ -70,7 +110,7 @@ export const useChatStore = create<State>((set) => {
   return {
     agents: [],
     currentAgentId: '',
-    sessions: [],
+    sessionsByAgent: {},
     currentSessionId: '',
     messagesBySession: {},
     setAgents: (agents, preferredAgentId) => set((state) => {
@@ -79,36 +119,71 @@ export const useChatStore = create<State>((set) => {
         : preferredAgentId && agents.some((agent) => agent.id === preferredAgentId)
           ? preferredAgentId
           : agents[0]?.id || ''
+      const nextSessions = state.sessionsByAgent[preferred] ?? []
 
       return {
         ...state,
         agents,
         currentAgentId: preferred,
+        currentSessionId: resolveCurrentSessionId(state.currentSessionId, nextSessions),
       }
     }),
     setCurrentAgentId: (id) => set((state) => ({
       ...state,
       currentAgentId: id,
-      sessions: [],
-      currentSessionId: '',
+      currentSessionId: resolveCurrentSessionId(state.currentSessionId, state.sessionsByAgent[id] ?? []),
     })),
-    setSessions: (sessions) => set((state) => ({
-      ...state,
-      sessions,
-      currentSessionId: sessions.some((session) => session.id === state.currentSessionId)
-        ? state.currentSessionId
-        : sessions[0]?.id || '',
-    })),
-    upsertSession: (session) => set((state) => {
-      const existingIndex = state.sessions.findIndex((item) => item.id === session.id)
-      const sessions = existingIndex >= 0
-        ? state.sessions.map((item) => item.id === session.id ? session : item)
-        : [session, ...state.sessions]
+    replaceAgentSessions: (agentId, sessions) => set((state) => {
+      const nextSessions = mergeAgentSessions(agentId, sessions, state.sessionsByAgent[agentId] ?? [])
 
       return {
         ...state,
-        sessions,
+        sessionsByAgent: {
+          ...state.sessionsByAgent,
+          [agentId]: nextSessions,
+        },
+        currentSessionId: state.currentAgentId === agentId
+          ? resolveCurrentSessionId(state.currentSessionId, nextSessions)
+          : state.currentSessionId,
+      }
+    }),
+    upsertAgentSession: (session) => set((state) => {
+      const currentSessions = state.sessionsByAgent[session.agentId] ?? []
+      const nextSessions = sortSessions([
+        session,
+        ...currentSessions.filter((item) => item.id !== session.id),
+      ])
+
+      return {
+        ...state,
+        currentAgentId: session.agentId,
+        sessionsByAgent: {
+          ...state.sessionsByAgent,
+          [session.agentId]: nextSessions,
+        },
         currentSessionId: session.id,
+      }
+    }),
+    markSessionOpened: (sessionId, updatedAt) => set((state) => {
+      const nextUpdatedAt = updatedAt || new Date().toISOString()
+      const nextSessionsByAgent = Object.fromEntries(
+        Object.entries(state.sessionsByAgent).map(([agentId, sessions]) => [
+          agentId,
+          sortSessions(sessions.map((session) => (
+            session.id === sessionId
+              ? {
+                  ...session,
+                  status: 'opened',
+                  updatedAt: nextUpdatedAt,
+                }
+              : session
+          ))),
+        ]),
+      )
+
+      return {
+        ...state,
+        sessionsByAgent: nextSessionsByAgent,
       }
     }),
     setSessionId: (id: string) => set((s) => ({ ...s, currentSessionId: id })),

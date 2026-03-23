@@ -107,6 +107,7 @@ export type ChatSendResult = {
 export type SessionCreateResult = {
   accepted: boolean
   created: boolean
+  sessionKey: string
   session: Session
 }
 
@@ -1107,11 +1108,11 @@ export class GatewayLogsClient {
     }
   }
 
-  async chatSend(params: { sessionKey: string; text: string; agentId?: string }): Promise<ChatSendResult> {
+  async chatSend(params: { sessionKey: string; message: string; idempotencyKey?: string }): Promise<ChatSendResult> {
     const payload = await this.request('chat.send', {
       sessionKey: params.sessionKey,
-      text: params.text,
-      ...(params.agentId ? { agentId: params.agentId } : {}),
+      message: params.message,
+      idempotencyKey: params.idempotencyKey ?? crypto.randomUUID(),
     })
 
     const record = asRecord(payload)
@@ -1447,12 +1448,14 @@ export class GatewayLogsClient {
 
 export const gatewayLogsClient = new GatewayLogsClient()
 
-function buildPanelSession(agentId: string, slug: string, preview?: string): Session {
+function buildPanelSession(agentId: string, preview?: string): Session {
+  const sessionKey = `agent:${agentId}:hanako-panel:${crypto.randomUUID()}`
+
   return {
-    sessionKey: `agent:${agentId}:panel:${slug}`,
+    sessionKey,
     agentId,
     updatedAt: new Date().toISOString(),
-    preview: preview || 'New panel session',
+    preview: preview || 'New Hanako panel session',
     status: 'pending',
   }
 }
@@ -1504,26 +1507,17 @@ export async function fetchChatHistory(sessionKey: string): Promise<ChatHistoryM
   return gatewayLogsClient.chatHistory({ sessionKey })
 }
 
-export async function sendChatMessage(params: { sessionKey: string; text: string; agentId?: string }): Promise<ChatSendResult> {
+export async function sendChatMessage(params: { sessionKey: string; message: string; idempotencyKey?: string }): Promise<ChatSendResult> {
   return gatewayLogsClient.chatSend(params)
 }
 
-export async function createPanelSession(agentId: string, slug: string, title?: string): Promise<SessionCreateResult> {
-  const sessionKey = `agent:${agentId}:panel:${slug}`
-  const existingSessions = await fetchAgentSessions(agentId)
-  const existing = existingSessions.find((session) => session.sessionKey === sessionKey)
-
-  if (existing) {
-    return {
-      accepted: true,
-      created: false,
-      session: existing,
-    }
-  }
+export async function createPanelSession(agentId: string, title?: string): Promise<SessionCreateResult> {
+  const session = buildPanelSession(agentId, title)
 
   return {
     accepted: true,
     created: true,
-    session: buildPanelSession(agentId, slug, title),
+    sessionKey: session.sessionKey,
+    session,
   }
 }

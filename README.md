@@ -53,7 +53,7 @@
 
 推荐的 session key 形式：
 
-- `agent:<agentId>:panel:<slug>`
+- `agent:<agentId>:hanako-panel:<uuid>`
 - `agent:<agentId>:task:<slug>`
 - `agent:<agentId>:workspace:<slug>`
 

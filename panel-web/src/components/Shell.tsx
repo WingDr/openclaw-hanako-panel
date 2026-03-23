@@ -46,11 +46,12 @@ export default function Shell({ children }: { children?: React.ReactNode }) {
   const agents = useChatStore((state) => state.agents)
   const currentAgentId = useChatStore((state) => state.currentAgentId)
   const currentSessionId = useChatStore((state) => state.currentSessionId)
+  const sessionsByAgent = useChatStore((state) => state.sessionsByAgent)
   const setAgents = useChatStore((state) => state.setAgents)
-  const setSessions = useChatStore((state) => state.setSessions)
+  const setCurrentAgentId = useChatStore((state) => state.setCurrentAgentId)
+  const replaceAgentSessions = useChatStore((state) => state.replaceAgentSessions)
   const setSessionId = useChatStore((state) => state.setSessionId)
   const [loadingAgents, setLoadingAgents] = React.useState(true)
-  const [sessionsByAgent, setSessionsByAgent] = React.useState<Record<string, ChatSession[]>>({})
   const [loadingSessionAgentIds, setLoadingSessionAgentIds] = React.useState<string[]>([])
   const [expandedAgentIds, setExpandedAgentIds] = React.useState<string[]>([])
   const [expandedChannelAgentIds, setExpandedChannelAgentIds] = React.useState<string[]>([])
@@ -106,22 +107,7 @@ export default function Shell({ children }: { children?: React.ReactNode }) {
     const validAgentIds = new Set(agents.map((agent) => agent.id))
     setExpandedAgentIds((currentIds) => currentIds.filter((id) => validAgentIds.has(id)))
     setExpandedChannelAgentIds((currentIds) => currentIds.filter((id) => validAgentIds.has(id)))
-    setSessionsByAgent((currentMap) => Object.fromEntries(
-      Object.entries(currentMap).filter(([agentId]) => validAgentIds.has(agentId)),
-    ))
   }, [agents])
-
-  useEffect(() => {
-    if (!currentAgentId) {
-      setSessions([])
-      return
-    }
-
-    const currentAgentSessions = sessionsByAgent[currentAgentId]
-    if (currentAgentSessions) {
-      setSessions(currentAgentSessions)
-    }
-  }, [currentAgentId, sessionsByAgent, setSessions])
 
   useEffect(() => {
     const targetAgentIds = Array.from(new Set([
@@ -152,15 +138,7 @@ export default function Shell({ children }: { children?: React.ReactNode }) {
       try {
         const nextSessions = await fetchSessions(agentId)
         if (!cancelled) {
-          setSessionsByAgent((currentMap) => ({
-            ...currentMap,
-            [agentId]: nextSessions,
-          }))
-
-          if (useChatStore.getState().currentAgentId === agentId) {
-            setSessions(nextSessions)
-          }
-
+          replaceAgentSessions(agentId, nextSessions)
           setSidebarError(null)
         }
       } catch (error) {
@@ -183,7 +161,7 @@ export default function Shell({ children }: { children?: React.ReactNode }) {
       cancelled = true
       window.clearInterval(intervalId)
     }
-  }, [currentAgentId, expandedAgentIds, setSessions])
+  }, [currentAgentId, expandedAgentIds, replaceAgentSessions])
 
   const toggleAgentExpanded = (agentId: string) => {
     setExpandedAgentIds((currentIds) => (
@@ -201,10 +179,9 @@ export default function Shell({ children }: { children?: React.ReactNode }) {
     ))
   }
 
-  const handleSelectSession = (agentId: string, agentSessions: ChatSession[], sessionId: string) => {
+  const handleSelectSession = (agentId: string, sessionId: string) => {
     if (agentId !== currentAgentId) {
-      useChatStore.getState().setCurrentAgentId(agentId)
-      setSessions(agentSessions)
+      setCurrentAgentId(agentId)
     }
 
     setSessionId(sessionId)
@@ -282,7 +259,7 @@ export default function Shell({ children }: { children?: React.ReactNode }) {
                         <button
                           key={session.id}
                           className={`pw-session-button ${session.id === currentSessionId ? 'is-active' : ''}`}
-                          onClick={() => handleSelectSession(agent.id, agentSessions, session.id)}
+                          onClick={() => handleSelectSession(agent.id, session.id)}
                         >
                           <div className="pw-session-title-row">
                             <span className="pw-session-title">{session.name}</span>
@@ -313,7 +290,7 @@ export default function Shell({ children }: { children?: React.ReactNode }) {
                                 <button
                                   key={session.id}
                                   className={`pw-session-button ${session.id === currentSessionId ? 'is-active' : ''}`}
-                                  onClick={() => handleSelectSession(agent.id, agentSessions, session.id)}
+                                  onClick={() => handleSelectSession(agent.id, session.id)}
                                 >
                                   <div className="pw-session-title-row">
                                     <span className="pw-session-title">{session.name}</span>

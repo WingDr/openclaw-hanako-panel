@@ -1,10 +1,12 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { fetchChatHistory, formatRelativeTime, mapProxySession } from '../api/client'
+import { fetchChatHistory, fetchSessions, formatRelativeTime, mapProxySession, type ChatSession } from '../api/client'
 import { panelRealtime } from '../realtime/ws'
 import { useChatStore } from '../store'
 import type { Message } from '../store'
 
 type CreatedSession = {
+  accepted?: boolean
+  created?: boolean
   sessionKey: string
   agentId: string
   preview?: string
@@ -22,13 +24,17 @@ const statusColor: Record<string, string> = {
   closed: '#a1a1aa',
 }
 
+const emptySessions: ChatSession[] = []
+
 export default function ChatPage() {
   const agents = useChatStore((state) => state.agents)
   const currentAgentId = useChatStore((state) => state.currentAgentId)
   const currentSessionId = useChatStore((state) => state.currentSessionId)
-  const sessions = useChatStore((state) => state.sessions)
+  const sessionsByAgent = useChatStore((state) => state.sessionsByAgent)
   const messagesBySession = useChatStore((state) => state.messagesBySession)
-  const upsertSession = useChatStore((state) => state.upsertSession)
+  const upsertAgentSession = useChatStore((state) => state.upsertAgentSession)
+  const replaceAgentSessions = useChatStore((state) => state.replaceAgentSessions)
+  const markSessionOpened = useChatStore((state) => state.markSessionOpened)
   const setSessionMessages = useChatStore((state) => state.setSessionMessages)
   const addUserMessage = useChatStore((state) => state.addUserMessage)
   const [text, setText] = useState('')
@@ -41,6 +47,7 @@ export default function ChatPage() {
   const loadedHistorySessionIds = useRef<Set<string>>(new Set())
   const messageStreamRef = useRef<HTMLDivElement | null>(null)
   const messageStreamEndRef = useRef<HTMLDivElement | null>(null)
+  const sessions = sessionsByAgent[currentAgentId] ?? emptySessions
   const currentAgent = useMemo(
     () => agents.find((agent) => agent.id === currentAgentId),
     [agents, currentAgentId],
@@ -64,6 +71,12 @@ export default function ChatPage() {
 
   useEffect(() => {
     if (!currentSessionId) {
+      setHistoryPending(false)
+      setHistoryError(null)
+      return
+    }
+
+    if (currentSession?.status === 'pending') {
       setHistoryPending(false)
       setHistoryError(null)
       return
@@ -103,7 +116,7 @@ export default function ChatPage() {
     return () => {
       cancelled = true
     }
-  }, [currentSessionId, setSessionMessages])
+  }, [currentSession?.status, currentSessionId, setSessionMessages])
 
   useLayoutEffect(() => {
     if (!currentSessionId) {
@@ -164,6 +177,13 @@ export default function ChatPage() {
         sessionKey: currentSessionId,
         text: trimmed,
       })
+      const updatedAt = new Date().toISOString()
+      markSessionOpened(currentSessionId, updatedAt)
+      try {
+        const nextSessions = await fetchSessions(currentAgent?.id || currentAgentId)
+        replaceAgentSessions(currentAgent?.id || currentAgentId, nextSessions)
+      } catch {
+      }
       setLastAck(`Message accepted${currentAgent ? ` for ${currentAgent.name}` : ''}`)
     } catch (error) {
       setActionError(error instanceof Error ? error.message : 'Failed to send message')
@@ -182,7 +202,6 @@ export default function ChatPage() {
       return
     }
 
-    const slug = `panel-${Date.now().toString(36)}`
     setCreatePending(true)
     setActionError(null)
     setLastAck(null)
@@ -190,11 +209,10 @@ export default function ChatPage() {
     try {
       const response = await panelRealtime.sendCommand<{ accepted?: boolean; session?: CreatedSession }>('session.create', {
         agentId: currentAgentId,
-        slug,
       })
       const created = response.result?.session
       if (created) {
-        upsertSession(mapProxySession(created))
+        upsertAgentSession(mapProxySession(created))
         setLastAck(`Prepared session ${created.sessionKey}`)
       }
     } catch (error) {
@@ -254,7 +272,7 @@ export default function ChatPage() {
           )}
           {currentSessionId && !historyPending && !historyError && currentMessages.length === 0 && (
             <div className="pw-empty-state">
-              No messages in this session yet.
+              {currentSession?.status === 'pending' ? 'Send the first message to start this session.' : 'No messages in this session yet.'}
             </div>
           )}
           {currentMessages.map((m: Message) => (

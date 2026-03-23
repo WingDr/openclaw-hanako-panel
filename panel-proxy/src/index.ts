@@ -177,7 +177,7 @@ async function main() {
 async function handleEnvelope(ws: WebSocket, envelope: BrowserCommand) {
   switch (envelope.cmd) {
     case 'chat.send': {
-      const text = typeof envelope.payload?.text === 'string'
+      const message = typeof envelope.payload?.text === 'string'
         ? envelope.payload.text
         : typeof envelope.payload?.message === 'string'
           ? envelope.payload.message
@@ -187,15 +187,17 @@ async function handleEnvelope(ws: WebSocket, envelope: BrowserCommand) {
         : typeof envelope.payload?.sessionId === 'string'
           ? envelope.payload.sessionId
           : ''
-      const agentId = typeof envelope.payload?.agentId === 'string' ? envelope.payload.agentId : undefined
+      const idempotencyKey = typeof envelope.payload?.idempotencyKey === 'string'
+        ? envelope.payload.idempotencyKey
+        : undefined
 
-      if (!sessionKey || !text.trim()) {
-        ws.send(JSON.stringify(ackError('chat.send', envelope.id, 'invalid_params', 'chat.send requires sessionKey and text')))
+      if (!sessionKey || !message.trim()) {
+        ws.send(JSON.stringify(ackError('chat.send', envelope.id, 'invalid_params', 'chat.send requires sessionKey and message')))
         break
       }
 
       try {
-        const result = await sendChatMessage({ agentId, sessionKey, text })
+        const result = await sendChatMessage({ sessionKey, message, idempotencyKey })
         ws.send(JSON.stringify(ack('chat.send', envelope.id, result)))
       } catch (error) {
         ws.send(JSON.stringify(ackError('chat.send', envelope.id, 'gateway_error', error instanceof Error ? error.message : 'Failed to send chat message')))
@@ -208,11 +210,10 @@ async function handleEnvelope(ws: WebSocket, envelope: BrowserCommand) {
     }
     case 'session.create': {
       const agentId = typeof envelope.payload?.agentId === 'string' ? envelope.payload.agentId : 'main'
-      const slug = typeof envelope.payload?.slug === 'string' ? envelope.payload.slug : `session-${Date.now()}`
       const title = typeof envelope.payload?.title === 'string' ? envelope.payload.title : undefined
 
       try {
-        const result = await createPanelSession(agentId, slug, title)
+        const result = await createPanelSession(agentId, title)
         ws.send(JSON.stringify(ack('session.create', envelope.id, result)))
       } catch (error) {
         ws.send(JSON.stringify(ackError('session.create', envelope.id, 'gateway_error', error instanceof Error ? error.message : 'Failed to create session')))

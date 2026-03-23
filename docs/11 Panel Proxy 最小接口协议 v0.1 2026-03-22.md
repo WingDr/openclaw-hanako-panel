@@ -139,7 +139,7 @@ proxy 只缓存少量运行期状态和 panel 自己的轻元数据。
   "ok": true,
   "data": [
     {
-      "sessionKey": "agent:main:panel:daily-review",
+      "sessionKey": "agent:main:hanako-panel:550e8400-e29b-41d4-a716-446655440000",
       "agentId": "main",
       "updatedAt": "2026-03-22T10:00:00Z",
       "preview": "继续整理 panel 的实现步骤"
@@ -180,7 +180,7 @@ proxy 只缓存少量运行期状态和 panel 自己的轻元数据。
     ],
     "recentSessions": [
       {
-        "sessionKey": "agent:main:panel:daily-review",
+        "sessionKey": "agent:main:hanako-panel:550e8400-e29b-41d4-a716-446655440000",
         "agentId": "main",
         "updatedAt": "2026-03-22T10:00:00Z"
       }
@@ -253,7 +253,7 @@ type HttpError = {
   "type": "cmd",
   "method": "chat.send",
   "params": {
-    "sessionKey": "agent:main:panel:daily-review",
+    "sessionKey": "agent:main:hanako-panel:550e8400-e29b-41d4-a716-446655440000",
     "text": "继续整理 panel 方案"
   }
 }
@@ -279,7 +279,7 @@ type HttpError = {
 {
   "type": "event",
   "event": "chat.delta",
-  "topic": "session:agent:main:panel:daily-review",
+  "topic": "session:agent:main:hanako-panel:550e8400-e29b-41d4-a716-446655440000",
   "payload": {
     "runId": "run_abc",
     "delta": "好的，我们先从页面树开始。"
@@ -295,7 +295,7 @@ type HttpError = {
 
 ```json
 {
-  "sessionKey": "agent:main:panel:daily-review",
+  "sessionKey": "agent:main:hanako-panel:550e8400-e29b-41d4-a716-446655440000",
   "text": "继续整理 panel 方案"
 }
 ```
@@ -338,24 +338,30 @@ type HttpError = {
 ```json
 {
   "agentId": "main",
-  "slug": "daily-review",
   "title": "Daily Review"
 }
 ```
 
 ### proxy 侧规则
 
-- `kind` 默认固定为 `panel`
-- 生成 `sessionKey = agent:<agentId>:panel:<slug>`
-- 若 session 已存在，返回同一个 key，但要显式说明是否复用
+- 由 proxy 生成 `sessionKey = agent:<agentId>:hanako-panel:<uuid>`
+- `session.create` 只准备一个 panel 本地 session
+- 真正上下文创建依赖后续第一次 `chat.send`
 
 ### ack 结果
 
 ```json
 {
   "accepted": true,
-  "sessionKey": "agent:main:panel:daily-review",
-  "created": true
+  "sessionKey": "agent:main:hanako-panel:550e8400-e29b-41d4-a716-446655440000",
+  "created": true,
+  "session": {
+    "sessionKey": "agent:main:hanako-panel:550e8400-e29b-41d4-a716-446655440000",
+    "agentId": "main",
+    "preview": "New Hanako panel session",
+    "updatedAt": "2026-03-23T12:00:00.000Z",
+    "status": "pending"
+  }
 }
 ```
 
@@ -369,7 +375,7 @@ type HttpError = {
 
 ```json
 {
-  "sessionKey": "agent:main:panel:daily-review"
+  "sessionKey": "agent:main:hanako-panel:550e8400-e29b-41d4-a716-446655440000"
 }
 ```
 
@@ -378,7 +384,7 @@ type HttpError = {
 ```json
 {
   "accepted": true,
-  "sessionKey": "agent:main:panel:daily-review"
+  "sessionKey": "agent:main:hanako-panel:550e8400-e29b-41d4-a716-446655440000"
 }
 ```
 
@@ -434,10 +440,10 @@ type HttpError = {
 {
   "type": "event",
   "event": "chat.started",
-  "topic": "session:agent:main:panel:daily-review",
+  "topic": "session:agent:main:hanako-panel:550e8400-e29b-41d4-a716-446655440000",
   "payload": {
     "runId": "run_abc",
-    "sessionKey": "agent:main:panel:daily-review"
+    "sessionKey": "agent:main:hanako-panel:550e8400-e29b-41d4-a716-446655440000"
   }
 }
 ```
@@ -448,7 +454,7 @@ type HttpError = {
 {
   "type": "event",
   "event": "chat.delta",
-  "topic": "session:agent:main:panel:daily-review",
+  "topic": "session:agent:main:hanako-panel:550e8400-e29b-41d4-a716-446655440000",
   "payload": {
     "runId": "run_abc",
     "delta": "好的，我们先从页面树开始。"
@@ -462,7 +468,7 @@ type HttpError = {
 {
   "type": "event",
   "event": "chat.done",
-  "topic": "session:agent:main:panel:daily-review",
+  "topic": "session:agent:main:hanako-panel:550e8400-e29b-41d4-a716-446655440000",
   "payload": {
     "runId": "run_abc",
     "messageId": "msg_123"
@@ -476,7 +482,7 @@ type HttpError = {
 {
   "type": "event",
   "event": "chat.error",
-  "topic": "session:agent:main:panel:daily-review",
+  "topic": "session:agent:main:hanako-panel:550e8400-e29b-41d4-a716-446655440000",
   "payload": {
     "runId": "run_abc",
     "error": {
@@ -579,7 +585,7 @@ type HttpError = {
 {
   "type": "event",
   "event": "chat.error",
-  "topic": "session:agent:main:panel:daily-review",
+  "topic": "session:agent:main:hanako-panel:550e8400-e29b-41d4-a716-446655440000",
   "payload": {
     "error": {
       "code": "upstream_disconnected",
@@ -639,8 +645,9 @@ type HttpError = {
 
 ## `session.create`
 
-- proxy 本地生成 session key
-- 若需要则调用 sessions 相关能力打开上下文
+- proxy 本地生成 `agent:<agentId>:hanako-panel:<uuid>`
+- 只在 panel 本地创建 `pending` session
+- 真正上下文创建依赖第一次 `chat.send`
 
 ## `session.open`
 
