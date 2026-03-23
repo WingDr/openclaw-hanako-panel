@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { fetchLogs, mapProxyLogLine } from '../api/client'
 import type { LogEntry } from '../api/client'
 import { panelRealtime } from '../realtime/ws'
@@ -23,6 +23,13 @@ type SystemConnectionPayload = {
   message?: string
 }
 
+const autoFollowThresholdPx = 32
+
+function isNearBottom(element: HTMLDivElement): boolean {
+  const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight
+  return distanceFromBottom <= autoFollowThresholdPx
+}
+
 export default function LogsPage() {
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [search, setSearch] = useState('')
@@ -30,6 +37,27 @@ export default function LogsPage() {
   const [live, setLive] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [connectionMessage, setConnectionMessage] = useState<string | null>(null)
+  const [autoFollow, setAutoFollow] = useState(true)
+  const logListRef = useRef<HTMLDivElement | null>(null)
+  const previousFilteredLogCountRef = useRef(0)
+
+  const scrollToBottom = (behavior: ScrollBehavior = 'auto') => {
+    const element = logListRef.current
+    if (!element) {
+      return
+    }
+
+    element.scrollTo({ top: element.scrollHeight, behavior })
+  }
+
+  const updateAutoFollow = () => {
+    const element = logListRef.current
+    if (!element) {
+      return
+    }
+
+    setAutoFollow(isNearBottom(element))
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -106,6 +134,18 @@ export default function LogsPage() {
     [logs, search],
   )
 
+  useEffect(() => {
+    const previousCount = previousFilteredLogCountRef.current
+    previousFilteredLogCountRef.current = filteredLogs.length
+
+    if (!autoFollow) {
+      return
+    }
+
+    const behavior: ScrollBehavior = previousCount > 0 && filteredLogs.length > previousCount ? 'smooth' : 'auto'
+    scrollToBottom(behavior)
+  }, [autoFollow, filteredLogs.length])
+
   return (
     <div className="pw-logs" style={{ display: 'flex', flexDirection: 'column', gap: 8, height: '100%' }}>
       <div className="pw-toolbar" style={{ display: 'flex', gap: 8, padding: 8, alignItems: 'center' }}>
@@ -121,8 +161,19 @@ export default function LogsPage() {
         >
           Clear
         </button>
+        {!autoFollow && (
+          <button
+            onClick={() => {
+              scrollToBottom('smooth')
+              setAutoFollow(true)
+            }}
+            style={{ padding: '8px 12px', borderRadius: 6, border: '1px solid var(--border)', background: 'rgba(255,255,255,0.06)', color: 'white' }}
+          >
+            Jump to latest
+          </button>
+        )}
         <div style={{ marginLeft: 'auto', color: live ? '#4ade80' : '#fca5a5', fontSize: 12 }}>
-          {live ? 'Live stream connected' : 'Snapshot only'}
+          {live ? (autoFollow ? 'Live stream following' : 'Live stream paused') : 'Snapshot only'}
         </div>
       </div>
       {error && (
@@ -131,7 +182,12 @@ export default function LogsPage() {
       {connectionMessage && !error && (
         <div style={{ padding: '0 8px', color: live ? '#93c5fd' : '#fca5a5' }}>{connectionMessage}</div>
       )}
-      <div className="pw-loglist" style={{ overflow: 'auto', padding: 8, display: 'grid', gap: 6 }}>
+      <div
+        ref={logListRef}
+        className="pw-loglist"
+        onScroll={updateAutoFollow}
+        style={{ overflow: 'auto', padding: 8, display: 'grid', gap: 6 }}
+      >
         {loading && <div style={{ color: '#888' }}>Loading logs...</div>}
         {!loading && filteredLogs.length === 0 && (
           <div style={{ color: '#888' }}>No logs match the current filter.</div>
