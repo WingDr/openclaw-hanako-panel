@@ -69,7 +69,6 @@ button {
 .pw-main-surface,
 .pw-right-rail-card,
 .pw-chat-surface,
-.pw-session-summary,
 .pw-manage-card,
 .pw-summary-card {
   background: linear-gradient(180deg, rgba(255, 250, 243, 0.98), rgba(245, 235, 223, 0.92));
@@ -674,12 +673,6 @@ button {
   box-shadow: 0 0 0 4px rgba(167, 108, 67, 0.1);
 }
 
-.pw-session-summary {
-  border-radius: var(--radius-lg);
-  padding: 18px;
-}
-
-.pw-session-facts,
 .pw-inline-list,
 .pw-status-panel,
 .pw-status-columns {
@@ -688,7 +681,6 @@ button {
   gap: 12px;
 }
 
-.pw-fact-row,
 .pw-list-row {
   padding: 10px 12px;
   border-radius: 14px;
@@ -696,12 +688,6 @@ button {
   border: 1px solid rgba(101, 76, 48, 0.08);
 }
 
-.pw-fact-row span {
-  color: var(--muted);
-  font-size: 0.84rem;
-}
-
-.pw-fact-row strong,
 .pw-status-value,
 .pw-summary-value {
   font-weight: 600;

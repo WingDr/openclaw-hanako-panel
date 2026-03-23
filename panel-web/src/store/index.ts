@@ -56,10 +56,10 @@ export const useChatStore = create<State>((set) => {
     currentSessionId: '',
     messagesBySession: {},
     setAgents: (agents, preferredAgentId) => set((state) => {
-      const preferred = preferredAgentId && agents.some((agent) => agent.id === preferredAgentId)
-        ? preferredAgentId
-        : state.currentAgentId && agents.some((agent) => agent.id === state.currentAgentId)
-          ? state.currentAgentId
+      const preferred = state.currentAgentId && agents.some((agent) => agent.id === state.currentAgentId)
+        ? state.currentAgentId
+        : preferredAgentId && agents.some((agent) => agent.id === preferredAgentId)
+          ? preferredAgentId
           : agents[0]?.id || ''
 
       return {

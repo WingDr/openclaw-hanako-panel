@@ -194,40 +194,6 @@ export default function ChatPage() {
           </div>
         </div>
       </section>
-
-      <section className="pw-session-summary">
-        <div className="pw-card-heading">
-          <div>
-            <p className="pw-section-kicker">Session notes</p>
-            <h2>Current conversation context</h2>
-          </div>
-        </div>
-        <div className="pw-session-facts">
-          <div className="pw-fact-row">
-            <span>Agent</span>
-            <strong>{currentAgent?.name || 'Not selected'}</strong>
-          </div>
-          <div className="pw-fact-row">
-            <span>Status</span>
-            <strong>{currentAgent?.status || 'unknown'}</strong>
-          </div>
-          <div className="pw-fact-row">
-            <span>Session key</span>
-            <strong>{currentSessionId || 'Not opened yet'}</strong>
-          </div>
-          <div className="pw-fact-row">
-            <span>Messages</span>
-            <strong>{currentMessages.length}</strong>
-          </div>
-          <div className="pw-fact-row">
-            <span>Updated</span>
-            <strong>{currentSession?.updated || formatRelativeTime(currentSession?.updatedAt) || '--'}</strong>
-          </div>
-        </div>
-        <div className="pw-inline-note">
-          Channel sessions are intentionally hidden from the left tree. This workspace focuses only on agent conversation sessions.
-        </div>
-      </section>
     </div>
   )
 }
