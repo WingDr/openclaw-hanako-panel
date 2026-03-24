@@ -1,16 +1,20 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
-  formatRelativeTime,
   mapProxyChatHistoryMessage,
   type AgentSummary,
   type ChatSession,
   type TranscriptItem,
-  type ToolInvocation,
 } from '../api/client'
 import { panelRealtime } from '../realtime/ws'
+import {
+  renderLiveChat,
+  renderPendingComposerMessage,
+  renderToolCard,
+  renderTranscriptItem,
+} from './ChatFlowMessageParts'
 import { ChatFlowConnectionLayer, type SyncBootstrapResult } from './runtime/ChatFlowConnectionLayer'
 import { applyChatFlowEvent } from './runtime/applyChatFlowEvent'
-import { useChatStore, type LiveChatState, type PendingComposerMessage, type ToolInvocationCard } from '../store'
+import { useChatStore, type PendingComposerMessage, type ToolInvocationCard } from '../store'
 
 type ChatFlowModuleProps = {
   currentAgent?: AgentSummary
@@ -22,125 +26,6 @@ type ChatFlowModuleProps = {
 const emptyTranscript: TranscriptItem[] = []
 const emptyPendingMessages: PendingComposerMessage[] = []
 const emptyToolCards: ToolInvocationCard[] = []
-
-function renderToolCard(
-  tool: ToolInvocation | ToolInvocationCard,
-  meta: { key: string; timestamp?: string; defaultOpen?: boolean; tone?: 'history' | 'live' },
-) {
-  const headerTimestamp = meta.timestamp || 'tool'
-  const result = tool.result?.trim()
-  const argumentsText = tool.arguments?.trim()
-  const command = tool.command?.trim()
-  const hasBody = Boolean(command || argumentsText || result || tool.error)
-
-  return (
-    <div key={meta.key} className="pw-message-row is-agent">
-      <div className={`pw-message-bubble is-agent pw-tool-card ${meta.tone === 'live' ? 'is-live' : ''}`}>
-        <details open={meta.defaultOpen} className="pw-tool-details">
-          <summary className="pw-message-meta pw-tool-summary">
-            <span>{tool.toolName}</span>
-            <span>{tool.status === 'running' ? 'running' : headerTimestamp}</span>
-          </summary>
-          <div className="pw-tool-chip-row">
-            {command && <div className="pw-tool-chip"><span>Command</span><code>{command}</code></div>}
-            {argumentsText && <div className="pw-tool-chip"><span>Args</span><code>{argumentsText}</code></div>}
-          </div>
-          {hasBody && (
-            <div className="pw-tool-body">
-              {result && (
-                <div className="pw-tool-block">
-                  <div className="pw-tool-block-label">Result</div>
-                  <pre className="pw-message-text">{result}</pre>
-                </div>
-              )}
-              {tool.error && (
-                <div className="pw-tool-block">
-                  <div className="pw-tool-block-label">Error</div>
-                  <pre className="pw-message-text">{tool.error}</pre>
-                </div>
-              )}
-            </div>
-          )}
-        </details>
-      </div>
-    </div>
-  )
-}
-
-function renderTranscriptItem(item: TranscriptItem, agentName?: string) {
-  if (item.kind === 'tool' && item.toolInvocation) {
-    return renderToolCard(item.toolInvocation, {
-      key: item.messageId,
-      timestamp: item.timestamp,
-      defaultOpen: false,
-      tone: 'history',
-    })
-  }
-
-  const isUser = item.kind === 'user'
-  const isSystem = item.kind === 'system' || item.kind === 'error'
-
-  return (
-    <div key={item.messageId} className={`pw-message-row ${isUser ? 'is-user' : 'is-agent'}`}>
-      <div className={`pw-message-bubble ${isUser ? 'is-user' : 'is-agent'}`}>
-        <div className="pw-message-meta">
-          <span>{isUser ? 'You' : isSystem ? 'System' : agentName || 'Agent'}</span>
-          <span>{item.timestamp}</span>
-        </div>
-        {item.text && <div className="pw-message-text">{item.text}</div>}
-        {(item.status === 'error' || item.status === 'aborted') && (
-          <div className="pw-message-meta">
-            <span>{item.status}</span>
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
-function renderPendingComposerMessage(message: PendingComposerMessage) {
-  return (
-    <div key={message.id} className="pw-message-row is-user">
-      <div className="pw-message-bubble is-user">
-        <div className="pw-message-meta">
-          <span>You</span>
-          <span>{message.timestamp}</span>
-        </div>
-        <div className="pw-message-text">{message.text}</div>
-        <div className="pw-message-meta">
-          <span>{message.status}</span>
-          {message.error && <span>{message.error}</span>}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function renderLiveChat(
-  liveChat: LiveChatState,
-  agentName?: string,
-  options?: { key?: string; text?: string; allowEmpty?: boolean },
-) {
-  const text = options?.text ?? liveChat.text
-  if (!options?.allowEmpty && !text.trim()) {
-    return null
-  }
-
-  return (
-    <div key={options?.key ?? `live:${liveChat.sessionId}`} className="pw-message-row is-agent">
-      <div className="pw-message-bubble is-agent">
-        <div className="pw-message-meta">
-          <span>{agentName || 'Agent'}</span>
-          <span>{new Date(liveChat.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-        </div>
-        <div className="pw-message-text">{text || '...'}</div>
-        <div className="pw-message-meta">
-          <span>streaming</span>
-        </div>
-      </div>
-    </div>
-  )
-}
 
 export function ChatFlowModule(props: ChatFlowModuleProps) {
   const { currentAgent, currentAgentId, currentSession, currentSessionId } = props
@@ -158,7 +43,6 @@ export function ChatFlowModule(props: ChatFlowModuleProps) {
   const [text, setText] = useState('')
   const [sendPending, setSendPending] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
-  const [lastAck, setLastAck] = useState<string | null>(null)
   const [historyPending, setHistoryPending] = useState(false)
   const [historyError, setHistoryError] = useState<string | null>(null)
 
@@ -166,6 +50,7 @@ export function ChatFlowModule(props: ChatFlowModuleProps) {
   const currentSessionIdRef = useRef<string>(currentSessionId)
   const messageStreamRef = useRef<HTMLDivElement | null>(null)
   const messageStreamEndRef = useRef<HTMLDivElement | null>(null)
+  const composerRef = useRef<HTMLTextAreaElement | null>(null)
 
   const currentHistory = historyBySession[currentSessionId] ?? emptyTranscript
   const currentLiveSegments = liveChatBySession[currentSessionId] ?? []
@@ -348,18 +233,16 @@ export function ChatFlowModule(props: ChatFlowModuleProps) {
       return
     }
 
+    let secondFrameId: number | null = null
     const firstFrameId = window.requestAnimationFrame(() => {
-      const secondFrameId = window.requestAnimationFrame(() => {
+      secondFrameId = window.requestAnimationFrame(() => {
         scrollMessagesToBottom()
       })
-
-      ;(firstFrameId as unknown as { nestedFrameId?: number }).nestedFrameId = secondFrameId
     })
 
     return () => {
-      const nestedFrameId = (firstFrameId as unknown as { nestedFrameId?: number }).nestedFrameId
-      if (typeof nestedFrameId === 'number') {
-        window.cancelAnimationFrame(nestedFrameId)
+      if (typeof secondFrameId === 'number') {
+        window.cancelAnimationFrame(secondFrameId)
       }
       window.cancelAnimationFrame(firstFrameId)
     }
@@ -379,6 +262,42 @@ export function ChatFlowModule(props: ChatFlowModuleProps) {
     }
   }, [currentSessionId, historyPending, visibleMessageCount])
 
+  useLayoutEffect(() => {
+    const textarea = composerRef.current
+    if (!textarea) {
+      return
+    }
+
+    textarea.style.height = '0px'
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 240)}px`
+  }, [text])
+
+  const insertComposerNewline = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key !== 'Enter' || event.nativeEvent.isComposing) {
+      return
+    }
+
+    event.preventDefault()
+
+    const textarea = event.currentTarget
+    const selectionStart = textarea.selectionStart ?? text.length
+    const selectionEnd = textarea.selectionEnd ?? text.length
+    const nextValue = `${text.slice(0, selectionStart)}\n${text.slice(selectionEnd)}`
+    const nextCaret = selectionStart + 1
+
+    setText(nextValue)
+
+    window.requestAnimationFrame(() => {
+      const nextTextarea = composerRef.current
+      if (!nextTextarea) {
+        return
+      }
+
+      nextTextarea.selectionStart = nextCaret
+      nextTextarea.selectionEnd = nextCaret
+    })
+  }
+
   const onSend = async () => {
     const trimmed = text.trim()
     if (!trimmed || !currentSessionId) {
@@ -390,7 +309,6 @@ export function ChatFlowModule(props: ChatFlowModuleProps) {
       return
     }
 
-    setLastAck(null)
     setText('')
     setActionError(null)
     const pendingMessageId = enqueuePendingComposerMessage(currentSessionId, trimmed)
@@ -404,7 +322,6 @@ export function ChatFlowModule(props: ChatFlowModuleProps) {
       const acknowledgedRunId = typeof response.result?.runId === 'string' ? response.result.runId : undefined
       markPendingComposerAccepted(currentSessionId, pendingMessageId, acknowledgedRunId)
       markSessionOpened(currentSessionId, new Date().toISOString())
-      setLastAck(`Message accepted${currentAgent ? ` for ${currentAgent.name}` : ''}`)
     } catch (error) {
       markPendingComposerFailed(
         currentSessionId,
@@ -424,34 +341,16 @@ export function ChatFlowModule(props: ChatFlowModuleProps) {
     }
 
     setActionError(null)
-    setLastAck(null)
 
     try {
       await panelRealtime.sendCommand('chat.abort', {
         ...(activeRunId ? { runId: activeRunId } : {}),
         sessionKey: currentSessionId,
       })
-      setLastAck('Stop requested')
     } catch (error) {
       setActionError(error instanceof Error ? error.message : 'Failed to stop current run')
     }
   }
-
-  const statusText = useMemo(() => {
-    if (currentLiveChat) {
-      return `Streaming reply${currentToolCards.length > 0 ? ` · ${currentToolCards.length} tool updates` : ''}`
-    }
-
-    if (hasAcceptedPending) {
-      return 'Waiting for stream to start'
-    }
-
-    if (currentAgent) {
-      return `${currentAgent.name} is ready`
-    }
-
-    return 'Select an agent to continue'
-  }, [currentAgent, currentLiveChat, currentToolCards.length, hasAcceptedPending])
 
   return (
     <section className="pw-chat-surface" aria-label="Chat workspace">
@@ -483,41 +382,71 @@ export function ChatFlowModule(props: ChatFlowModuleProps) {
       </div>
 
       <div className="pw-input-shell">
-        <div className="pw-input-meta">
-          <span>{statusText}</span>
-          <span>{currentSession?.updated || formatRelativeTime(currentSession?.updatedAt) || 'Fresh session'}</span>
-        </div>
-        <div className="pw-input-row">
-          <input
+        <div className="pw-input-textarea-shell">
+          <textarea
+            ref={composerRef}
+            rows={1}
             value={text}
             onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault()
-                void onSend()
-              }
-            }}
+            onKeyDown={insertComposerNewline}
             placeholder="Type a message to the selected agent..."
             disabled={!currentSessionId || sendPending || currentAgentOffline || currentBusy}
             className="pw-chat-input"
           />
-          {canAbort && (
-            <button
-              className="pw-secondary-button"
-              onClick={() => void onAbort()}
-              disabled={sendPending}
-            >
-              Stop
-            </button>
-          )}
-          <button
-            className="pw-primary-button"
-            onClick={() => void onSend()}
-            disabled={!currentSessionId || sendPending || currentAgentOffline || currentBusy}
-          >
-            Send
-          </button>
         </div>
+        <div className="pw-input-toolbar">
+          <div className="pw-input-toolset">
+            <button
+              className="pw-tool-toggle-button is-icon"
+              type="button"
+              onClick={() => undefined}
+              aria-label="Insert attachment"
+            >
+              +
+            </button>
+            <button
+              className="pw-tool-toggle-button"
+              type="button"
+              onClick={() => undefined}
+            >
+              Attach
+            </button>
+            <button
+              className="pw-tool-toggle-button"
+              type="button"
+              onClick={() => undefined}
+            >
+              Tools
+            </button>
+          </div>
+          <div className="pw-input-actions">
+            {canAbort ? (
+              <button
+                className="pw-primary-button"
+                onClick={() => void onAbort()}
+                disabled={sendPending}
+                type="button"
+              >
+                Stop
+              </button>
+            ) : null}
+            {!canAbort ? (
+              <button
+                className="pw-primary-button"
+                onClick={() => void onSend()}
+                disabled={!currentSessionId || sendPending || currentAgentOffline || currentBusy}
+                type="button"
+              >
+                Send
+              </button>
+            ) : null}
+          </div>
+        </div>
+        {actionError && (
+          <div className="pw-inline-note">
+            {actionError}
+          </div>
+        )}
       </div>
     </section>
   )

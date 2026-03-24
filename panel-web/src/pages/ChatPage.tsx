@@ -38,7 +38,6 @@ export default function ChatPage() {
 
   const [createPending, setCreatePending] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
-  const [createAck, setCreateAck] = useState<string | null>(null)
 
   const sessions = sessionsByAgent[currentAgentId] ?? emptySessions
   const currentAgent = useMemo(
@@ -68,7 +67,6 @@ export default function ChatPage() {
 
     setCreatePending(true)
     setCreateError(null)
-    setCreateAck(null)
 
     try {
       const response = await panelRealtime.sendCommand<{ accepted?: boolean; session?: CreatedSession }>('session.create', {
@@ -77,7 +75,6 @@ export default function ChatPage() {
       const created = response.result?.session
       if (created) {
         upsertAgentSession(mapProxySession(created))
-        setCreateAck(`Prepared session ${created.sessionKey}`)
       }
     } catch (error) {
       setCreateError(error instanceof Error ? error.message : 'Failed to create session')
@@ -111,6 +108,7 @@ export default function ChatPage() {
           </button>
         </div>
       </header>
+      {createError && <div className="pw-inline-note">{createError}</div>}
 
       <ChatFlowModule
         currentAgent={currentAgent}
