@@ -1,5 +1,5 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { fetchChatHistory, fetchSessions, formatRelativeTime, mapProxySession, type ChatSession, type TranscriptItem, type ToolInvocation } from '../api/client'
+import { fetchChatHistory, formatRelativeTime, mapProxySession, type ChatSession, type TranscriptItem, type ToolInvocation } from '../api/client'
 import { handleChatRealtimeEvent } from '../realtime/chatEventBridge'
 import { panelRealtime } from '../realtime/ws'
 import { useChatStore, type LiveChatState, type PendingComposerMessage, type ToolInvocationCard } from '../store'
@@ -149,7 +149,6 @@ export default function ChatPage() {
   const toolStreamBySession = useChatStore((state) => state.toolStreamBySession)
   const pendingComposerBySession = useChatStore((state) => state.pendingComposerBySession)
   const upsertAgentSession = useChatStore((state) => state.upsertAgentSession)
-  const replaceAgentSessions = useChatStore((state) => state.replaceAgentSessions)
   const markSessionOpened = useChatStore((state) => state.markSessionOpened)
   const setSessionHistory = useChatStore((state) => state.setSessionHistory)
   const clearSessionTransientState = useChatStore((state) => state.clearSessionTransientState)
@@ -316,11 +315,6 @@ export default function ChatPage() {
       markPendingComposerAccepted(currentSessionId, pendingMessageId, acknowledgedRunId)
       const updatedAt = new Date().toISOString()
       markSessionOpened(currentSessionId, updatedAt)
-      try {
-        const nextSessions = await fetchSessions(currentAgentId)
-        replaceAgentSessions(currentAgentId, nextSessions)
-      } catch {
-      }
       setLastAck(`Message accepted${currentAgent ? ` for ${currentAgent.name}` : ''}`)
     } catch (error) {
       markPendingComposerFailed(

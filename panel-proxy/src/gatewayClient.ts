@@ -206,6 +206,17 @@ const collectStringList = (...values: unknown[]): string[] => {
   return [...output]
 }
 
+const asRecordArray = (value: unknown): Record<string, unknown>[] => {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value.flatMap((entry) => {
+    const record = asRecord(entry)
+    return record ? [record] : []
+  })
+}
+
 const toIsoTimestamp = (value: unknown): string | undefined => {
   const stringValue = asString(value)
   if (stringValue) {
@@ -344,6 +355,20 @@ const stringifyStructuredValue = (value: unknown): string | undefined => {
   }
 }
 
+const extractMessageRecord = (payload: Record<string, unknown>): Record<string, unknown> | undefined => (
+  asRecord(pickFirst(payload, ['message', 'deltaMessage', 'item']))
+)
+
+const extractMessageContentParts = (payload: Record<string, unknown>): Record<string, unknown>[] => {
+  const messageRecord = extractMessageRecord(payload)
+  return asRecordArray(messageRecord?.content ?? messageRecord?.parts ?? messageRecord?.items)
+}
+
+const findMessageContentPart = (
+  payload: Record<string, unknown>,
+  predicate: (part: Record<string, unknown>) => boolean,
+): Record<string, unknown> | undefined => extractMessageContentParts(payload).find(predicate)
+
 const stringifyToolCommand = (value: unknown): string | undefined => {
   if (typeof value === 'string') {
     return trimToUndefined(value)
@@ -375,7 +400,7 @@ const stringifyToolCommand = (value: unknown): string | undefined => {
 }
 
 const extractToolCommand = (payload: Record<string, unknown>): string | undefined => {
-  return stringifyToolCommand(
+  const direct = stringifyToolCommand(
     pickFirst(payload, [
       'command',
       'cmd',
@@ -387,6 +412,31 @@ const extractToolCommand = (payload: Record<string, unknown>): string | undefine
       'invocation',
       'request',
       'params',
+    ]),
+  )
+
+  if (direct) {
+    return direct
+  }
+
+  const toolCallPart = findMessageContentPart(payload, (part) => {
+    const type = asString(part.type)?.toLowerCase()
+    return type === 'toolcall' || type === 'tool_call' || type === 'functioncall' || type === 'function_call'
+  })
+
+  return stringifyToolCommand(
+    pickFirst(toolCallPart ?? {}, [
+      'command',
+      'cmd',
+      'argv',
+      'args',
+      'arguments',
+      'input',
+      'stdin',
+      'invocation',
+      'request',
+      'params',
+      'name',
     ]),
   )
 }
@@ -409,15 +459,32 @@ const extractToolArguments = (payload: Record<string, unknown>): string | undefi
   }
 
   const { command: _command, cmd: _cmd, program: _program, name: _name, ...rest } = nestedInvocation
-  return stringifyStructuredValue(rest)
+  const nestedValue = stringifyStructuredValue(rest)
+  if (nestedValue) {
+    return nestedValue
+  }
+
+  const toolCallPart = findMessageContentPart(payload, (part) => {
+    const type = asString(part.type)?.toLowerCase()
+    return type === 'toolcall' || type === 'tool_call' || type === 'functioncall' || type === 'function_call'
+  })
+
+  if (!toolCallPart) {
+    return undefined
+  }
+
+  return stringifyStructuredValue(
+    pickFirst(toolCallPart, ['arguments', 'args', 'params', 'input', 'partialJson']),
+  )
 }
 
 const extractToolResult = (payload: Record<string, unknown>): string | undefined => {
-  return stringifyStructuredValue(
+  const direct = stringifyStructuredValue(
     pickFirst(payload, [
       'result',
       'output',
       'stdout',
+      'stderr',
       'response',
       'body',
       'summary',
@@ -426,6 +493,17 @@ const extractToolResult = (payload: Record<string, unknown>): string | undefined
       'content',
     ]),
   )
+
+  if (direct) {
+    return direct
+  }
+
+  const messageRecord = extractMessageRecord(payload)
+  if (!messageRecord) {
+    return undefined
+  }
+
+  return trimToUndefined(collectMessageText(messageRecord.content ?? messageRecord.parts ?? messageRecord.items).join('\n\n'))
 }
 
 function collectMessageText(value: unknown): string[] {
@@ -1226,6 +1304,12 @@ const extractGatewayRunId = (payload: Record<string, unknown>): string | undefin
 
 const extractGatewayToolCallId = (payload: Record<string, unknown>): string | undefined => (
   asString(pickFirst(payload, ['toolCallId', 'toolId', 'callId', 'invocationId', 'id']))
+  ?? asString(pickFirst(asRecord(payload.invocation) ?? {}, ['toolCallId', 'toolId', 'callId', 'invocationId', 'id']))
+  ?? asString(pickFirst(asRecord(payload.request) ?? {}, ['toolCallId', 'toolId', 'callId', 'invocationId', 'id']))
+  ?? asString(pickFirst(findMessageContentPart(payload, (part) => {
+    const type = asString(part.type)?.toLowerCase()
+    return type === 'toolcall' || type === 'tool_call' || type === 'functioncall' || type === 'function_call'
+  }) ?? {}, ['id', 'toolCallId', 'toolId', 'callId', 'invocationId']))
 )
 
 const extractGatewayDeltaText = (payload: Record<string, unknown>): string | undefined => {
@@ -1266,18 +1350,60 @@ const buildGatewayBrowserTopic = (params: {
 }
 
 const isToolLikePayload = (payload: Record<string, unknown>): boolean => {
-  if (extractGatewayToolCallId(payload) || asString(pickFirst(payload, ['toolName', 'tool', 'name']))) {
+  if (
+    extractGatewayToolCallId(payload)
+    || asString(pickFirst(payload, ['toolName', 'tool', 'name', 'commandName', 'functionName']))
+  ) {
     return true
   }
 
+  const roleLike = asString(pickFirst(payload, ['role', 'type', 'kind', 'author']))?.toLowerCase()
+  if (roleLike && ['tool', 'function', 'function_call', 'tool_call', 'invocation'].includes(roleLike)) {
+    return true
+  }
+
+  const messageRole = asString(extractMessageRecord(payload)?.role)?.toLowerCase()
+  if (messageRole && ['toolresult', 'tool_result', 'tool', 'function', 'assistant'].includes(messageRole)) {
+    if (messageRole !== 'assistant') {
+      return true
+    }
+
+    if (findMessageContentPart(payload, (part) => {
+      const type = asString(part.type)?.toLowerCase()
+      return type === 'toolcall' || type === 'tool_call' || type === 'functioncall' || type === 'function_call'
+    })) {
+      return true
+    }
+  }
+
   const lifecycle = asString(pickFirst(payload, ['phase', 'status', 'state', 'event']))?.toLowerCase()
-  return Boolean(lifecycle && lifecycle.includes('tool'))
+  if (lifecycle && (lifecycle.includes('tool') || lifecycle.includes('function') || lifecycle.includes('invocation'))) {
+    return true
+  }
+
+  return (
+    payload.invocation !== undefined
+    || payload.request !== undefined
+    || payload.output !== undefined
+    || payload.result !== undefined
+    || payload.stdout !== undefined
+    || payload.stderr !== undefined
+    || payload.command !== undefined
+    || payload.cmd !== undefined
+    || payload.args !== undefined
+    || payload.arguments !== undefined
+    || payload.params !== undefined
+  )
 }
 
 const normalizeGatewayBrowserKind = (
   rawEvent: string,
   payload: Record<string, unknown>,
 ): GatewayBrowserEvent['kind'] | undefined => {
+  if (rawEvent !== 'session' && !rawEvent.startsWith('session.') && isToolLikePayload(payload)) {
+    return 'tool'
+  }
+
   if (rawEvent === 'chat' || rawEvent.startsWith('chat.')) {
     return 'chat'
   }
@@ -1330,7 +1456,13 @@ const normalizeGatewayBrowserEvent = (frame: GatewayEventFrame): GatewayBrowserE
   const toolCommand = extractToolCommand(payload)
   const toolArguments = extractToolArguments(payload)
   const toolResult = extractToolResult(payload)
-  const toolName = asString(pickFirst(payload, ['toolName', 'tool', 'name', 'commandName']))
+  const toolName = asString(pickFirst(payload, ['toolName', 'tool', 'name', 'commandName', 'functionName']))
+    ?? asString(pickFirst(asRecord(payload.invocation) ?? {}, ['toolName', 'tool', 'name', 'commandName', 'functionName']))
+    ?? asString(pickFirst(asRecord(payload.request) ?? {}, ['toolName', 'tool', 'name', 'commandName', 'functionName']))
+    ?? asString(pickFirst(findMessageContentPart(payload, (part) => {
+      const type = asString(part.type)?.toLowerCase()
+      return type === 'toolcall' || type === 'tool_call' || type === 'functioncall' || type === 'function_call'
+    }) ?? {}, ['name', 'toolName', 'tool', 'commandName', 'functionName']))
   const normalizedPayload: Record<string, unknown> = {
     ...payload,
     gatewayEvent: rawEvent,

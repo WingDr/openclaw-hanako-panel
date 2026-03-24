@@ -157,6 +157,24 @@ const mergeAgentSessions = (agentId: string, remoteSessions: ChatSession[], loca
   return sortSessions([...mergedById.values()])
 }
 
+const areSessionsEqual = (left: ChatSession[], right: ChatSession[]): boolean => {
+  if (left.length !== right.length) {
+    return false
+  }
+
+  return left.every((session, index) => {
+    const next = right[index]
+    return (
+      session.id === next?.id
+      && session.agentId === next.agentId
+      && session.name === next.name
+      && session.updatedAt === next.updatedAt
+      && session.updated === next.updated
+      && session.status === next.status
+    )
+  })
+}
+
 const appendTranscriptItems = (
   existing: TranscriptItem[],
   nextItems: TranscriptItem[],
@@ -262,7 +280,11 @@ export const useChatStore = create<State>((set) => ({
     currentSessionId: resolveCurrentSessionId(state.currentSessionId, state.sessionsByAgent[id] ?? []),
   })),
   replaceAgentSessions: (agentId, sessions) => set((state) => {
+    const currentSessions = state.sessionsByAgent[agentId] ?? []
     const nextSessions = mergeAgentSessions(agentId, sessions, state.sessionsByAgent[agentId] ?? [])
+    if (areSessionsEqual(currentSessions, nextSessions)) {
+      return state
+    }
 
     return {
       ...state,
@@ -281,6 +303,9 @@ export const useChatStore = create<State>((set) => ({
       session,
       ...currentSessions.filter((item) => item.id !== session.id),
     ])
+    if (areSessionsEqual(currentSessions, nextSessions) && state.currentSessionId === session.id && state.currentAgentId === session.agentId) {
+      return state
+    }
 
     return {
       ...state,
@@ -298,6 +323,9 @@ export const useChatStore = create<State>((set) => ({
       session,
       ...currentSessions.filter((item) => item.id !== session.id),
     ])
+    if (areSessionsEqual(currentSessions, nextSessions)) {
+      return state
+    }
 
     return {
       ...state,
@@ -314,15 +342,21 @@ export const useChatStore = create<State>((set) => ({
         agentId,
         sortSessions(sessions.map((session) => (
           session.id === sessionId
-            ? {
-                ...session,
-                status: 'opened',
-                updatedAt: nextUpdatedAt,
-              }
-            : session
+          ? {
+              ...session,
+              status: 'opened',
+              updatedAt: nextUpdatedAt,
+            }
+          : session
         ))),
       ]),
     )
+    const unchanged = Object.entries(state.sessionsByAgent).every(([agentId, sessions]) => (
+      areSessionsEqual(sessions, nextSessionsByAgent[agentId] ?? [])
+    ))
+    if (unchanged) {
+      return state
+    }
 
     return {
       ...state,
