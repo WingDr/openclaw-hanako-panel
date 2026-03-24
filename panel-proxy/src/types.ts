@@ -16,12 +16,26 @@ export type Session = {
   status: SessionStatus
 }
 
-export type ChatHistoryMessage = {
-  id: string
+export type ToolInvocationStatus = 'pending' | 'running' | 'done' | 'error'
+
+export type ToolInvocation = {
+  toolName: string
+  toolCallId?: string
+  command?: string
+  arguments?: string
+  result?: string
+  status: ToolInvocationStatus
+  error?: string
+}
+
+export type ChatHistoryItem = {
+  messageId: string
   sessionKey: string
-  author: 'agent' | 'user'
-  text: string
+  kind: 'user' | 'assistant' | 'tool' | 'system' | 'error'
   createdAt: string
+  text?: string
+  status?: 'complete' | 'error' | 'aborted'
+  toolInvocation?: ToolInvocation
 }
 
 export type LogLine = {
@@ -92,7 +106,7 @@ export type ErrorShape = {
 export type BrowserCommand = {
   id?: string
   type?: 'cmd'
-  cmd: 'chat.send' | 'chat.abort' | 'session.create' | 'session.open' | 'logs.subscribe' | 'logs.unsubscribe'
+  cmd: 'chat.send' | 'chat.abort' | 'chat.inject' | 'session.create' | 'session.open' | 'logs.subscribe' | 'logs.unsubscribe'
   payload?: Record<string, unknown>
 }
 
@@ -107,8 +121,19 @@ export type AckEnvelope = {
 
 export type EventEnvelope = {
   type: 'event'
-  event: 'logs.append' | 'logs.reset' | 'system.connection' | 'status.snapshot'
+  event:
+    | 'gateway.chat'
+    | 'gateway.tool'
+    | 'gateway.session'
+    | 'logs.append'
+    | 'logs.reset'
+    | 'system.connection'
+    | 'status.snapshot'
+  kind: 'chat' | 'tool' | 'session' | 'logs' | 'system' | 'status'
   topic?: string
+  at?: string
+  sessionKey?: string
+  runId?: string
   payload: unknown
 }
 

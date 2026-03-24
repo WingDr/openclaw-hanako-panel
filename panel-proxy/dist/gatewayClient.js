@@ -11,6 +11,7 @@ exports.fetchAgentSessions = fetchAgentSessions;
 exports.fetchSessions = fetchSessions;
 exports.fetchChatHistory = fetchChatHistory;
 exports.sendChatMessage = sendChatMessage;
+exports.abortChatRun = abortChatRun;
 exports.createPanelSession = createPanelSession;
 const node_crypto_1 = __importDefault(require("node:crypto"));
 const node_fs_1 = __importDefault(require("node:fs"));
@@ -18,6 +19,7 @@ const node_os_1 = __importDefault(require("node:os"));
 const node_path_1 = __importDefault(require("node:path"));
 const node_tls_1 = __importDefault(require("node:tls"));
 const ws_1 = __importDefault(require("ws"));
+const browserWsHub_1 = require("./browserWsHub");
 const openClawConfigPath = node_path_1.default.join(node_os_1.default.homedir(), '.openclaw', 'openclaw.json');
 const openClawDeviceIdentityPath = node_path_1.default.join(node_os_1.default.homedir(), '.openclaw', 'identity', 'device.json');
 const panelProxyIdentityPath = node_path_1.default.join(node_os_1.default.homedir(), '.openclaw-hanako-panel', 'device-identity.json');
@@ -143,7 +145,10 @@ const normalizeSessionStatus = (value) => {
     }
     return 'opened';
 };
-const normalizeHistoryAuthor = (value) => {
+const normalizeTranscriptKind = (value, isToolLike) => {
+    if (isToolLike) {
+        return 'tool';
+    }
     const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
     if ([
         'user',
@@ -159,7 +164,128 @@ const normalizeHistoryAuthor = (value) => {
     ].includes(normalized)) {
         return 'user';
     }
-    return 'agent';
+    if (['system', 'notice', 'meta'].includes(normalized)) {
+        return 'system';
+    }
+    return 'assistant';
+};
+const normalizeTranscriptStatus = (value) => {
+    const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+    if (['error', 'failed', 'failure'].includes(normalized)) {
+        return 'error';
+    }
+    if (['aborted', 'cancelled', 'canceled', 'stopped'].includes(normalized)) {
+        return 'aborted';
+    }
+    return normalized ? 'complete' : undefined;
+};
+const normalizeToolInvocationStatus = (value) => {
+    const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+    if (['error', 'failed', 'failure'].includes(normalized)) {
+        return 'error';
+    }
+    if (['pending', 'creating', 'queued'].includes(normalized)) {
+        return 'pending';
+    }
+    if (['running', 'streaming', 'started', 'active', 'working', 'processing'].includes(normalized)) {
+        return 'running';
+    }
+    return 'done';
+};
+const stringifyStructuredValue = (value) => {
+    const directValue = asString(value);
+    if (directValue) {
+        return directValue;
+    }
+    if (typeof value === 'number' || typeof value === 'boolean') {
+        return String(value);
+    }
+    if (Array.isArray(value)) {
+        const entries = value
+            .map((entry) => stringifyStructuredValue(entry))
+            .filter((entry) => Boolean(entry));
+        return entries.length > 0 ? trimToUndefined(entries.join('\n')) : undefined;
+    }
+    const record = asRecord(value);
+    if (!record) {
+        return undefined;
+    }
+    try {
+        return trimToUndefined(JSON.stringify(record, null, 2));
+    }
+    catch {
+        return undefined;
+    }
+};
+const stringifyToolCommand = (value) => {
+    if (typeof value === 'string') {
+        return trimToUndefined(value);
+    }
+    if (Array.isArray(value)) {
+        const parts = value.flatMap((entry) => {
+            const next = stringifyToolCommand(entry);
+            return next ? [next] : [];
+        });
+        return trimToUndefined(parts.join(' '));
+    }
+    const record = asRecord(value);
+    if (!record) {
+        return undefined;
+    }
+    const command = asString(pickFirst(record, ['command', 'cmd', 'program', 'name']));
+    const args = Array.isArray(record.args)
+        ? record.args.map((item) => asString(item)).filter((item) => Boolean(item))
+        : [];
+    const joined = [command, ...args].filter((item) => Boolean(item)).join(' ');
+    if (joined) {
+        return joined;
+    }
+    return trimToUndefined(JSON.stringify(record));
+};
+const extractToolCommand = (payload) => {
+    return stringifyToolCommand(pickFirst(payload, [
+        'command',
+        'cmd',
+        'argv',
+        'args',
+        'arguments',
+        'input',
+        'stdin',
+        'invocation',
+        'request',
+        'params',
+    ]));
+};
+const extractToolArguments = (payload) => {
+    const directArguments = pickFirst(payload, [
+        'arguments',
+        'args',
+        'params',
+        'input',
+        'stdin',
+    ]);
+    if (directArguments !== undefined) {
+        return stringifyStructuredValue(directArguments);
+    }
+    const nestedInvocation = asRecord(pickFirst(payload, ['invocation', 'request']));
+    if (!nestedInvocation) {
+        return undefined;
+    }
+    const { command: _command, cmd: _cmd, program: _program, name: _name, ...rest } = nestedInvocation;
+    return stringifyStructuredValue(rest);
+};
+const extractToolResult = (payload) => {
+    return stringifyStructuredValue(pickFirst(payload, [
+        'result',
+        'output',
+        'stdout',
+        'response',
+        'body',
+        'summary',
+        'message',
+        'text',
+        'content',
+    ]));
 };
 function collectMessageText(value) {
     const directValue = asString(value);
@@ -202,11 +328,12 @@ function normalizeHistoryRecord(raw, sessionKey, index, fallbackCreatedAt) {
             return undefined;
         }
         return {
-            id: `${sessionKey}:history:${index + 1}`,
+            messageId: `${sessionKey}:history:${index + 1}`,
             sessionKey,
-            author: 'agent',
+            kind: 'assistant',
             text,
             createdAt: fallbackCreatedAt,
+            status: 'complete',
             order: index,
         };
     }
@@ -214,16 +341,50 @@ function normalizeHistoryRecord(raw, sessionKey, index, fallbackCreatedAt) {
     if (!record) {
         return undefined;
     }
+    const toolCallId = asString(pickFirst(record, ['toolCallId', 'toolId', 'callId', 'invocationId']));
+    const toolName = asString(pickFirst(record, ['toolName', 'tool', 'name', 'commandName']));
+    const isToolLike = Boolean(toolCallId
+        || toolName
+        || ['tool', 'function'].includes(asString(pickFirst(record, ['role', 'author', 'type', 'kind']))?.toLowerCase() ?? ''));
+    const roleValue = pickFirst(record, ['author', 'role', 'sender', 'from', 'source', 'direction']);
+    const kind = normalizeTranscriptKind(roleValue, isToolLike);
+    const createdAt = toIsoTimestamp(pickFirst(record, ['createdAt', 'timestamp', 'ts', 'time', 'at', 'date'])) ?? fallbackCreatedAt;
+    const status = normalizeTranscriptStatus(pickFirst(record, ['status', 'state', 'phase']));
+    if (kind === 'tool') {
+        const toolInvocation = {
+            toolName: toolName ?? 'Tool',
+            toolCallId,
+            command: extractToolCommand(record),
+            arguments: extractToolArguments(record),
+            result: extractToolResult(record) ?? trimToUndefined(collectMessageText(raw).join('\n\n')),
+            status: normalizeToolInvocationStatus(pickFirst(record, ['status', 'state', 'phase'])),
+            error: asString(pickFirst(asRecord(record.error) ?? {}, ['message', 'error'])) ?? asString(record.error),
+        };
+        if (!toolInvocation.command && !toolInvocation.arguments && !toolInvocation.result && !toolInvocation.toolCallId) {
+            return undefined;
+        }
+        return {
+            messageId: asString(pickFirst(record, ['id', 'messageId', 'entryId', 'key'])) ?? `${sessionKey}:history:${index + 1}`,
+            sessionKey,
+            kind,
+            text: toolInvocation.result,
+            createdAt,
+            status,
+            toolInvocation,
+            order: index,
+        };
+    }
     const text = trimToUndefined(collectMessageText(raw).join('\n\n'));
     if (!text) {
         return undefined;
     }
     return {
-        id: asString(pickFirst(record, ['id', 'messageId', 'entryId', 'key'])) ?? `${sessionKey}:history:${index + 1}`,
+        messageId: asString(pickFirst(record, ['id', 'messageId', 'entryId', 'key'])) ?? `${sessionKey}:history:${index + 1}`,
         sessionKey,
-        author: normalizeHistoryAuthor(pickFirst(record, ['author', 'role', 'sender', 'from', 'source', 'direction'])),
+        kind: status === 'error' && kind !== 'user' ? 'error' : kind,
         text,
-        createdAt: toIsoTimestamp(pickFirst(record, ['createdAt', 'timestamp', 'ts', 'time', 'at', 'date'])) ?? fallbackCreatedAt,
+        createdAt,
+        status,
         order: index,
     };
 }
@@ -771,6 +932,119 @@ function isGatewayEventFrame(payload) {
 function isGatewayResponseFrame(payload) {
     return payload.type === 'res';
 }
+const extractSessionKeyFromTopic = (value) => {
+    const topic = asString(value);
+    if (!topic || !topic.startsWith('session:')) {
+        return undefined;
+    }
+    return trimToUndefined(topic.slice('session:'.length).split(':run:')[0]?.split(':tool:')[0]);
+};
+const extractGatewaySessionKey = (payload) => (asString(pickFirst(payload, ['sessionKey', 'sessionId']))
+    ?? extractSessionKeyFromTopic(pickFirst(payload, ['topic', 'path'])));
+const extractGatewayRunId = (payload) => (asString(pickFirst(payload, ['runId', 'responseId', 'chatId'])));
+const extractGatewayToolCallId = (payload) => (asString(pickFirst(payload, ['toolCallId', 'toolId', 'callId', 'invocationId', 'id'])));
+const extractGatewayDeltaText = (payload) => {
+    return trimToUndefined(collectMessageText(pickFirst(payload, ['delta', 'chunk'])).join('\n\n'));
+};
+const extractGatewayFullText = (payload) => {
+    return trimToUndefined(collectMessageText(pickFirst(payload, ['text', 'message', 'content', 'summary', 'output', 'result'])).join('\n\n'));
+};
+const extractGatewayErrorMessage = (payload) => {
+    const errorRecord = asRecord(payload.error);
+    return asString(pickFirst(errorRecord ?? {}, ['message', 'error'])) ?? asString(payload.message) ?? asString(payload.error);
+};
+const buildGatewayBrowserTopic = (params) => {
+    if (!params.sessionKey) {
+        return undefined;
+    }
+    let topic = `session:${params.sessionKey}`;
+    if (params.runId) {
+        topic = `${topic}:run:${params.runId}`;
+    }
+    if (params.toolCallId) {
+        topic = `${topic}:tool:${params.toolCallId}`;
+    }
+    return topic;
+};
+const isToolLikePayload = (payload) => {
+    if (extractGatewayToolCallId(payload) || asString(pickFirst(payload, ['toolName', 'tool', 'name']))) {
+        return true;
+    }
+    const lifecycle = asString(pickFirst(payload, ['phase', 'status', 'state', 'event']))?.toLowerCase();
+    return Boolean(lifecycle && lifecycle.includes('tool'));
+};
+const normalizeGatewayBrowserKind = (rawEvent, payload) => {
+    if (rawEvent === 'chat' || rawEvent.startsWith('chat.')) {
+        return 'chat';
+    }
+    if (rawEvent === 'tool' || rawEvent.startsWith('tool.')) {
+        return 'tool';
+    }
+    if (rawEvent === 'agent' && isToolLikePayload(payload)) {
+        return 'tool';
+    }
+    if (rawEvent === 'session' || rawEvent.startsWith('session.')) {
+        return 'session';
+    }
+    return undefined;
+};
+const gatewayBrowserEventNameForKind = (kind) => {
+    switch (kind) {
+        case 'chat':
+            return 'gateway.chat';
+        case 'tool':
+            return 'gateway.tool';
+        case 'session':
+            return 'gateway.session';
+    }
+};
+const normalizeGatewayBrowserEvent = (frame) => {
+    const rawEvent = asString(frame.event);
+    const payload = asRecord(frame.payload);
+    if (!rawEvent || !payload) {
+        return undefined;
+    }
+    const kind = normalizeGatewayBrowserKind(rawEvent, payload);
+    if (!kind) {
+        return undefined;
+    }
+    const sessionKey = extractGatewaySessionKey(payload);
+    const runId = extractGatewayRunId(payload);
+    const toolCallId = extractGatewayToolCallId(payload);
+    const updatedAt = toIsoTimestamp(pickFirst(payload, ['updatedAt', 'timestamp', 'ts', 'time', 'at'])) ?? new Date().toISOString();
+    const deltaText = extractGatewayDeltaText(payload);
+    const fullText = extractGatewayFullText(payload);
+    const errorMessage = extractGatewayErrorMessage(payload);
+    const toolCommand = extractToolCommand(payload);
+    const toolArguments = extractToolArguments(payload);
+    const toolResult = extractToolResult(payload);
+    const toolName = asString(pickFirst(payload, ['toolName', 'tool', 'name', 'commandName']));
+    const normalizedPayload = {
+        ...payload,
+        gatewayEvent: rawEvent,
+        updatedAt,
+        ...(sessionKey ? { sessionKey } : {}),
+        ...(runId ? { runId } : {}),
+        ...(toolCallId ? { toolCallId } : {}),
+        ...(toolName ? { toolName } : {}),
+        ...(toolCommand ? { toolCommand } : {}),
+        ...(toolArguments ? { toolArguments } : {}),
+        ...(toolResult ? { toolResult } : {}),
+        ...(fullText ? { text: fullText, fullText } : {}),
+        ...(deltaText ? { delta: deltaText } : {}),
+        ...(errorMessage ? { errorMessage, error: { message: errorMessage } } : {}),
+    };
+    return {
+        type: 'event',
+        event: gatewayBrowserEventNameForKind(kind),
+        kind,
+        topic: buildGatewayBrowserTopic({ sessionKey, runId, toolCallId }),
+        at: updatedAt,
+        sessionKey,
+        runId,
+        payload: normalizedPayload,
+    };
+};
 function normalizeTlsFingerprint(value) {
     return (value ?? '').trim().replace(/^sha-?256\s*:?\s*/i, '').replace(/[^a-fA-F0-9]/g, '').toLowerCase();
 }
@@ -865,13 +1139,22 @@ class GatewayLogsClient {
     async chatSend(params) {
         const payload = await this.request('chat.send', {
             sessionKey: params.sessionKey,
-            text: params.text,
-            ...(params.agentId ? { agentId: params.agentId } : {}),
+            message: params.message,
+            idempotencyKey: params.idempotencyKey ?? node_crypto_1.default.randomUUID(),
         });
         const record = asRecord(payload);
         return {
             accepted: true,
+            sessionKey: asString(record?.sessionKey) ?? params.sessionKey,
             runId: asString(record?.runId) ?? asString(record?.id),
+        };
+    }
+    async chatAbort(params) {
+        await this.request('chat.abort', params.sessionKey
+            ? { sessionKey: params.sessionKey }
+            : { ...(params.runId ? { runId: params.runId } : {}) });
+        return {
+            accepted: true,
         };
     }
     async chatHistory(params) {
@@ -1026,6 +1309,10 @@ class GatewayLogsClient {
             if (payload.event === 'connect.challenge') {
                 void this.sendConnectChallengeResponse(payload.payload);
             }
+            const browserEvent = normalizeGatewayBrowserEvent(payload);
+            if (browserEvent) {
+                browserWsHub_1.browserWsHub.broadcast(browserEvent);
+            }
             return;
         }
         if (!isGatewayResponseFrame(payload) || !payload.id) {
@@ -1152,12 +1439,13 @@ class GatewayLogsClient {
 }
 exports.GatewayLogsClient = GatewayLogsClient;
 exports.gatewayLogsClient = new GatewayLogsClient();
-function buildPanelSession(agentId, slug, preview) {
+function buildPanelSession(agentId, preview) {
+    const sessionKey = `agent:${agentId}:hanako-panel:${node_crypto_1.default.randomUUID()}`;
     return {
-        sessionKey: `agent:${agentId}:panel:${slug}`,
+        sessionKey,
         agentId,
         updatedAt: new Date().toISOString(),
-        preview: preview || 'New panel session',
+        preview: preview || 'New Hanako panel session',
         status: 'pending',
     };
 }
@@ -1206,20 +1494,15 @@ async function fetchChatHistory(sessionKey) {
 async function sendChatMessage(params) {
     return exports.gatewayLogsClient.chatSend(params);
 }
-async function createPanelSession(agentId, slug, title) {
-    const sessionKey = `agent:${agentId}:panel:${slug}`;
-    const existingSessions = await fetchAgentSessions(agentId);
-    const existing = existingSessions.find((session) => session.sessionKey === sessionKey);
-    if (existing) {
-        return {
-            accepted: true,
-            created: false,
-            session: existing,
-        };
-    }
+async function abortChatRun(params) {
+    return exports.gatewayLogsClient.chatAbort(params);
+}
+async function createPanelSession(agentId, title) {
+    const session = buildPanelSession(agentId, title);
     return {
         accepted: true,
         created: true,
-        session: buildPanelSession(agentId, slug, title),
+        sessionKey: session.sessionKey,
+        session,
     };
 }

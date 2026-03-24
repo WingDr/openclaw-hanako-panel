@@ -124,7 +124,9 @@ async function main() {
             ws.send(JSON.stringify({
                 type: 'event',
                 event: 'system.connection',
+                kind: 'system',
                 topic: 'gateway',
+                at: (0, logsService_1.getGatewayConnectionSnapshot)().at,
                 payload: (0, logsService_1.getGatewayConnectionSnapshot)(),
             }));
         }
@@ -152,7 +154,7 @@ async function main() {
 async function handleEnvelope(ws, envelope) {
     switch (envelope.cmd) {
         case 'chat.send': {
-            const text = typeof envelope.payload?.text === 'string'
+            const message = typeof envelope.payload?.text === 'string'
                 ? envelope.payload.text
                 : typeof envelope.payload?.message === 'string'
                     ? envelope.payload.message
@@ -162,13 +164,15 @@ async function handleEnvelope(ws, envelope) {
                 : typeof envelope.payload?.sessionId === 'string'
                     ? envelope.payload.sessionId
                     : '';
-            const agentId = typeof envelope.payload?.agentId === 'string' ? envelope.payload.agentId : undefined;
-            if (!sessionKey || !text.trim()) {
-                ws.send(JSON.stringify(ackError('chat.send', envelope.id, 'invalid_params', 'chat.send requires sessionKey and text')));
+            const idempotencyKey = typeof envelope.payload?.idempotencyKey === 'string'
+                ? envelope.payload.idempotencyKey
+                : undefined;
+            if (!sessionKey || !message.trim()) {
+                ws.send(JSON.stringify(ackError('chat.send', envelope.id, 'invalid_params', 'chat.send requires sessionKey and message')));
                 break;
             }
             try {
-                const result = await (0, gatewayClient_1.sendChatMessage)({ agentId, sessionKey, text });
+                const result = await (0, gatewayClient_1.sendChatMessage)({ sessionKey, message, idempotencyKey });
                 ws.send(JSON.stringify(ack('chat.send', envelope.id, result)));
             }
             catch (error) {
@@ -177,15 +181,34 @@ async function handleEnvelope(ws, envelope) {
             break;
         }
         case 'chat.abort': {
-            ws.send(JSON.stringify(ack('chat.abort', envelope.id, { accepted: true })));
+            const runId = typeof envelope.payload?.runId === 'string' ? envelope.payload.runId : undefined;
+            const sessionKey = typeof envelope.payload?.sessionKey === 'string'
+                ? envelope.payload.sessionKey
+                : typeof envelope.payload?.sessionId === 'string'
+                    ? envelope.payload.sessionId
+                    : undefined;
+            if (!runId && !sessionKey) {
+                ws.send(JSON.stringify(ackError('chat.abort', envelope.id, 'invalid_params', 'chat.abort requires runId or sessionKey')));
+                break;
+            }
+            try {
+                const result = await (0, gatewayClient_1.abortChatRun)({ runId, sessionKey });
+                ws.send(JSON.stringify(ack('chat.abort', envelope.id, result)));
+            }
+            catch (error) {
+                ws.send(JSON.stringify(ackError('chat.abort', envelope.id, 'gateway_error', error instanceof Error ? error.message : 'Failed to abort chat run')));
+            }
+            break;
+        }
+        case 'chat.inject': {
+            ws.send(JSON.stringify(ackError('chat.inject', envelope.id, 'unsupported', 'chat.inject is not implemented yet')));
             break;
         }
         case 'session.create': {
             const agentId = typeof envelope.payload?.agentId === 'string' ? envelope.payload.agentId : 'main';
-            const slug = typeof envelope.payload?.slug === 'string' ? envelope.payload.slug : `session-${Date.now()}`;
             const title = typeof envelope.payload?.title === 'string' ? envelope.payload.title : undefined;
             try {
-                const result = await (0, gatewayClient_1.createPanelSession)(agentId, slug, title);
+                const result = await (0, gatewayClient_1.createPanelSession)(agentId, title);
                 ws.send(JSON.stringify(ack('session.create', envelope.id, result)));
             }
             catch (error) {
@@ -222,7 +245,7 @@ async function handleEnvelope(ws, envelope) {
             break;
         }
         default:
-            ws.send(JSON.stringify(ackError('chat.send', envelope.id, 'unknown_command', 'Unknown command')));
+            ws.send(JSON.stringify(ackError(envelope.cmd, envelope.id, 'unknown_command', 'Unknown command')));
     }
 }
 main().catch((err) => {

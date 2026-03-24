@@ -4,7 +4,8 @@ import os from 'node:os'
 import path from 'node:path'
 import tls from 'node:tls'
 import WebSocket from 'ws'
-import { Agent, BootstrapResponse, ChatHistoryMessage, GatewayConnectionPayload, LogLine, Session } from './types'
+import { browserWsHub } from './browserWsHub'
+import { Agent, BootstrapResponse, ChatHistoryItem, GatewayConnectionPayload, LogLine, Session, ToolInvocation, ToolInvocationStatus } from './types'
 
 const openClawConfigPath = path.join(os.homedir(), '.openclaw', 'openclaw.json')
 const openClawDeviceIdentityPath = path.join(os.homedir(), '.openclaw', 'identity', 'device.json')
@@ -101,7 +102,12 @@ export type GatewayLogsTailResult = {
 
 export type ChatSendResult = {
   accepted: boolean
+  sessionKey?: string
   runId?: string
+}
+
+export type ChatAbortResult = {
+  accepted: boolean
 }
 
 export type SessionCreateResult = {
@@ -251,7 +257,11 @@ const normalizeSessionStatus = (value: unknown): Session['status'] => {
   return 'opened'
 }
 
-const normalizeHistoryAuthor = (value: unknown): ChatHistoryMessage['author'] => {
+const normalizeTranscriptKind = (value: unknown, isToolLike: boolean): ChatHistoryItem['kind'] => {
+  if (isToolLike) {
+    return 'tool'
+  }
+
   const normalized = typeof value === 'string' ? value.trim().toLowerCase() : ''
   if ([
     'user',
@@ -268,7 +278,154 @@ const normalizeHistoryAuthor = (value: unknown): ChatHistoryMessage['author'] =>
     return 'user'
   }
 
-  return 'agent'
+  if (['system', 'notice', 'meta'].includes(normalized)) {
+    return 'system'
+  }
+
+  return 'assistant'
+}
+
+const normalizeTranscriptStatus = (value: unknown): ChatHistoryItem['status'] => {
+  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : ''
+  if (['error', 'failed', 'failure'].includes(normalized)) {
+    return 'error'
+  }
+
+  if (['aborted', 'cancelled', 'canceled', 'stopped'].includes(normalized)) {
+    return 'aborted'
+  }
+
+  return normalized ? 'complete' : undefined
+}
+
+const normalizeToolInvocationStatus = (value: unknown): ToolInvocationStatus => {
+  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : ''
+  if (['error', 'failed', 'failure'].includes(normalized)) {
+    return 'error'
+  }
+
+  if (['pending', 'creating', 'queued'].includes(normalized)) {
+    return 'pending'
+  }
+
+  if (['running', 'streaming', 'started', 'active', 'working', 'processing'].includes(normalized)) {
+    return 'running'
+  }
+
+  return 'done'
+}
+
+const stringifyStructuredValue = (value: unknown): string | undefined => {
+  const directValue = asString(value)
+  if (directValue) {
+    return directValue
+  }
+
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value)
+  }
+
+  if (Array.isArray(value)) {
+    const entries = value
+      .map((entry) => stringifyStructuredValue(entry))
+      .filter((entry): entry is string => Boolean(entry))
+    return entries.length > 0 ? trimToUndefined(entries.join('\n')) : undefined
+  }
+
+  const record = asRecord(value)
+  if (!record) {
+    return undefined
+  }
+
+  try {
+    return trimToUndefined(JSON.stringify(record, null, 2))
+  } catch {
+    return undefined
+  }
+}
+
+const stringifyToolCommand = (value: unknown): string | undefined => {
+  if (typeof value === 'string') {
+    return trimToUndefined(value)
+  }
+
+  if (Array.isArray(value)) {
+    const parts = value.flatMap((entry) => {
+      const next = stringifyToolCommand(entry)
+      return next ? [next] : []
+    })
+    return trimToUndefined(parts.join(' '))
+  }
+
+  const record = asRecord(value)
+  if (!record) {
+    return undefined
+  }
+
+  const command = asString(pickFirst(record, ['command', 'cmd', 'program', 'name']))
+  const args = Array.isArray(record.args)
+    ? record.args.map((item) => asString(item)).filter((item): item is string => Boolean(item))
+    : []
+  const joined = [command, ...args].filter((item): item is string => Boolean(item)).join(' ')
+  if (joined) {
+    return joined
+  }
+
+  return trimToUndefined(JSON.stringify(record))
+}
+
+const extractToolCommand = (payload: Record<string, unknown>): string | undefined => {
+  return stringifyToolCommand(
+    pickFirst(payload, [
+      'command',
+      'cmd',
+      'argv',
+      'args',
+      'arguments',
+      'input',
+      'stdin',
+      'invocation',
+      'request',
+      'params',
+    ]),
+  )
+}
+
+const extractToolArguments = (payload: Record<string, unknown>): string | undefined => {
+  const directArguments = pickFirst(payload, [
+    'arguments',
+    'args',
+    'params',
+    'input',
+    'stdin',
+  ])
+  if (directArguments !== undefined) {
+    return stringifyStructuredValue(directArguments)
+  }
+
+  const nestedInvocation = asRecord(pickFirst(payload, ['invocation', 'request']))
+  if (!nestedInvocation) {
+    return undefined
+  }
+
+  const { command: _command, cmd: _cmd, program: _program, name: _name, ...rest } = nestedInvocation
+  return stringifyStructuredValue(rest)
+}
+
+const extractToolResult = (payload: Record<string, unknown>): string | undefined => {
+  return stringifyStructuredValue(
+    pickFirst(payload, [
+      'result',
+      'output',
+      'stdout',
+      'response',
+      'body',
+      'summary',
+      'message',
+      'text',
+      'content',
+    ]),
+  )
 }
 
 function collectMessageText(value: unknown): string[] {
@@ -316,7 +473,7 @@ function normalizeHistoryRecord(
   sessionKey: string,
   index: number,
   fallbackCreatedAt: string,
-): (ChatHistoryMessage & { order: number }) | undefined {
+): (ChatHistoryItem & { order: number }) | undefined {
   if (typeof raw === 'string') {
     const text = trimToUndefined(raw)
     if (!text) {
@@ -324,11 +481,12 @@ function normalizeHistoryRecord(
     }
 
     return {
-      id: `${sessionKey}:history:${index + 1}`,
+      messageId: `${sessionKey}:history:${index + 1}`,
       sessionKey,
-      author: 'agent',
+      kind: 'assistant',
       text,
       createdAt: fallbackCreatedAt,
+      status: 'complete',
       order: index,
     }
   }
@@ -338,22 +496,62 @@ function normalizeHistoryRecord(
     return undefined
   }
 
+  const toolCallId = asString(pickFirst(record, ['toolCallId', 'toolId', 'callId', 'invocationId']))
+  const toolName = asString(pickFirst(record, ['toolName', 'tool', 'name', 'commandName']))
+  const isToolLike = Boolean(
+    toolCallId
+    || toolName
+    || ['tool', 'function'].includes(asString(pickFirst(record, ['role', 'author', 'type', 'kind']))?.toLowerCase() ?? ''),
+  )
+  const roleValue = pickFirst(record, ['author', 'role', 'sender', 'from', 'source', 'direction'])
+  const kind = normalizeTranscriptKind(roleValue, isToolLike)
+  const createdAt = toIsoTimestamp(pickFirst(record, ['createdAt', 'timestamp', 'ts', 'time', 'at', 'date'])) ?? fallbackCreatedAt
+  const status = normalizeTranscriptStatus(pickFirst(record, ['status', 'state', 'phase']))
+
+  if (kind === 'tool') {
+    const toolInvocation: ToolInvocation = {
+      toolName: toolName ?? 'Tool',
+      toolCallId,
+      command: extractToolCommand(record),
+      arguments: extractToolArguments(record),
+      result: extractToolResult(record) ?? trimToUndefined(collectMessageText(raw).join('\n\n')),
+      status: normalizeToolInvocationStatus(pickFirst(record, ['status', 'state', 'phase'])),
+      error: asString(pickFirst(asRecord(record.error) ?? {}, ['message', 'error'])) ?? asString(record.error),
+    }
+
+    if (!toolInvocation.command && !toolInvocation.arguments && !toolInvocation.result && !toolInvocation.toolCallId) {
+      return undefined
+    }
+
+    return {
+      messageId: asString(pickFirst(record, ['id', 'messageId', 'entryId', 'key'])) ?? `${sessionKey}:history:${index + 1}`,
+      sessionKey,
+      kind,
+      text: toolInvocation.result,
+      createdAt,
+      status,
+      toolInvocation,
+      order: index,
+    }
+  }
+
   const text = trimToUndefined(collectMessageText(raw).join('\n\n'))
   if (!text) {
     return undefined
   }
 
   return {
-    id: asString(pickFirst(record, ['id', 'messageId', 'entryId', 'key'])) ?? `${sessionKey}:history:${index + 1}`,
+    messageId: asString(pickFirst(record, ['id', 'messageId', 'entryId', 'key'])) ?? `${sessionKey}:history:${index + 1}`,
     sessionKey,
-    author: normalizeHistoryAuthor(pickFirst(record, ['author', 'role', 'sender', 'from', 'source', 'direction'])),
+    kind: status === 'error' && kind !== 'user' ? 'error' : kind,
     text,
-    createdAt: toIsoTimestamp(pickFirst(record, ['createdAt', 'timestamp', 'ts', 'time', 'at', 'date'])) ?? fallbackCreatedAt,
+    createdAt,
+    status,
     order: index,
   }
 }
 
-function normalizeChatHistoryPayload(payload: unknown, sessionKey: string): ChatHistoryMessage[] {
+function normalizeChatHistoryPayload(payload: unknown, sessionKey: string): ChatHistoryItem[] {
   const fallbackCreatedAt = new Date().toISOString()
   const rawEntries = Array.isArray(payload)
     ? payload
@@ -383,7 +581,7 @@ function normalizeChatHistoryPayload(payload: unknown, sessionKey: string): Chat
 
   return rawEntries
     .map((entry, index) => normalizeHistoryRecord(entry, sessionKey, index, fallbackCreatedAt))
-    .filter((entry): entry is ChatHistoryMessage & { order: number } => Boolean(entry))
+    .filter((entry): entry is ChatHistoryItem & { order: number } => Boolean(entry))
     .sort((left, right) => {
       if (left.createdAt === right.createdAt) {
         return left.order - right.order
@@ -997,6 +1195,170 @@ function isGatewayResponseFrame(payload: GatewayFrame): payload is GatewayRespon
   return payload.type === 'res'
 }
 
+type GatewayBrowserEvent = {
+  type: 'event'
+  event: 'gateway.chat' | 'gateway.tool' | 'gateway.session'
+  kind: 'chat' | 'tool' | 'session'
+  topic?: string
+  at: string
+  sessionKey?: string
+  runId?: string
+  payload: Record<string, unknown>
+}
+
+const extractSessionKeyFromTopic = (value: unknown): string | undefined => {
+  const topic = asString(value)
+  if (!topic || !topic.startsWith('session:')) {
+    return undefined
+  }
+
+  return trimToUndefined(topic.slice('session:'.length).split(':run:')[0]?.split(':tool:')[0])
+}
+
+const extractGatewaySessionKey = (payload: Record<string, unknown>): string | undefined => (
+  asString(pickFirst(payload, ['sessionKey', 'sessionId']))
+  ?? extractSessionKeyFromTopic(pickFirst(payload, ['topic', 'path']))
+)
+
+const extractGatewayRunId = (payload: Record<string, unknown>): string | undefined => (
+  asString(pickFirst(payload, ['runId', 'responseId', 'chatId']))
+)
+
+const extractGatewayToolCallId = (payload: Record<string, unknown>): string | undefined => (
+  asString(pickFirst(payload, ['toolCallId', 'toolId', 'callId', 'invocationId', 'id']))
+)
+
+const extractGatewayDeltaText = (payload: Record<string, unknown>): string | undefined => {
+  return trimToUndefined(collectMessageText(
+    pickFirst(payload, ['delta', 'chunk']),
+  ).join('\n\n'))
+}
+
+const extractGatewayFullText = (payload: Record<string, unknown>): string | undefined => {
+  return trimToUndefined(collectMessageText(
+    pickFirst(payload, ['text', 'message', 'content', 'summary', 'output', 'result']),
+  ).join('\n\n'))
+}
+
+const extractGatewayErrorMessage = (payload: Record<string, unknown>): string | undefined => {
+  const errorRecord = asRecord(payload.error)
+  return asString(pickFirst(errorRecord ?? {}, ['message', 'error'])) ?? asString(payload.message) ?? asString(payload.error)
+}
+
+const buildGatewayBrowserTopic = (params: {
+  sessionKey?: string
+  runId?: string
+  toolCallId?: string
+}): string | undefined => {
+  if (!params.sessionKey) {
+    return undefined
+  }
+
+  let topic = `session:${params.sessionKey}`
+  if (params.runId) {
+    topic = `${topic}:run:${params.runId}`
+  }
+  if (params.toolCallId) {
+    topic = `${topic}:tool:${params.toolCallId}`
+  }
+
+  return topic
+}
+
+const isToolLikePayload = (payload: Record<string, unknown>): boolean => {
+  if (extractGatewayToolCallId(payload) || asString(pickFirst(payload, ['toolName', 'tool', 'name']))) {
+    return true
+  }
+
+  const lifecycle = asString(pickFirst(payload, ['phase', 'status', 'state', 'event']))?.toLowerCase()
+  return Boolean(lifecycle && lifecycle.includes('tool'))
+}
+
+const normalizeGatewayBrowserKind = (
+  rawEvent: string,
+  payload: Record<string, unknown>,
+): GatewayBrowserEvent['kind'] | undefined => {
+  if (rawEvent === 'chat' || rawEvent.startsWith('chat.')) {
+    return 'chat'
+  }
+
+  if (rawEvent === 'tool' || rawEvent.startsWith('tool.')) {
+    return 'tool'
+  }
+
+  if (rawEvent === 'agent' && isToolLikePayload(payload)) {
+    return 'tool'
+  }
+
+  if (rawEvent === 'session' || rawEvent.startsWith('session.')) {
+    return 'session'
+  }
+
+  return undefined
+}
+
+const gatewayBrowserEventNameForKind = (kind: GatewayBrowserEvent['kind']): GatewayBrowserEvent['event'] => {
+  switch (kind) {
+    case 'chat':
+      return 'gateway.chat'
+    case 'tool':
+      return 'gateway.tool'
+    case 'session':
+      return 'gateway.session'
+  }
+}
+
+const normalizeGatewayBrowserEvent = (frame: GatewayEventFrame): GatewayBrowserEvent | undefined => {
+  const rawEvent = asString(frame.event)
+  const payload = asRecord(frame.payload)
+  if (!rawEvent || !payload) {
+    return undefined
+  }
+
+  const kind = normalizeGatewayBrowserKind(rawEvent, payload)
+  if (!kind) {
+    return undefined
+  }
+
+  const sessionKey = extractGatewaySessionKey(payload)
+  const runId = extractGatewayRunId(payload)
+  const toolCallId = extractGatewayToolCallId(payload)
+  const updatedAt = toIsoTimestamp(pickFirst(payload, ['updatedAt', 'timestamp', 'ts', 'time', 'at'])) ?? new Date().toISOString()
+  const deltaText = extractGatewayDeltaText(payload)
+  const fullText = extractGatewayFullText(payload)
+  const errorMessage = extractGatewayErrorMessage(payload)
+  const toolCommand = extractToolCommand(payload)
+  const toolArguments = extractToolArguments(payload)
+  const toolResult = extractToolResult(payload)
+  const toolName = asString(pickFirst(payload, ['toolName', 'tool', 'name', 'commandName']))
+  const normalizedPayload: Record<string, unknown> = {
+    ...payload,
+    gatewayEvent: rawEvent,
+    updatedAt,
+    ...(sessionKey ? { sessionKey } : {}),
+    ...(runId ? { runId } : {}),
+    ...(toolCallId ? { toolCallId } : {}),
+    ...(toolName ? { toolName } : {}),
+    ...(toolCommand ? { toolCommand } : {}),
+    ...(toolArguments ? { toolArguments } : {}),
+    ...(toolResult ? { toolResult } : {}),
+    ...(fullText ? { text: fullText, fullText } : {}),
+    ...(deltaText ? { delta: deltaText } : {}),
+    ...(errorMessage ? { errorMessage, error: { message: errorMessage } } : {}),
+  }
+
+  return {
+    type: 'event',
+    event: gatewayBrowserEventNameForKind(kind),
+    kind,
+    topic: buildGatewayBrowserTopic({ sessionKey, runId, toolCallId }),
+    at: updatedAt,
+    sessionKey,
+    runId,
+    payload: normalizedPayload,
+  }
+}
+
 function normalizeTlsFingerprint(value?: string): string {
   return (value ?? '').trim().replace(/^sha-?256\s*:?\s*/i, '').replace(/[^a-fA-F0-9]/g, '').toLowerCase()
 }
@@ -1118,11 +1480,22 @@ export class GatewayLogsClient {
     const record = asRecord(payload)
     return {
       accepted: true,
+      sessionKey: asString(record?.sessionKey) ?? params.sessionKey,
       runId: asString(record?.runId) ?? asString(record?.id),
     }
   }
 
-  async chatHistory(params: { sessionKey: string }): Promise<ChatHistoryMessage[]> {
+  async chatAbort(params: { sessionKey?: string; runId?: string }): Promise<ChatAbortResult> {
+    await this.request('chat.abort', params.sessionKey
+      ? { sessionKey: params.sessionKey }
+      : { ...(params.runId ? { runId: params.runId } : {}) })
+
+    return {
+      accepted: true,
+    }
+  }
+
+  async chatHistory(params: { sessionKey: string }): Promise<ChatHistoryItem[]> {
     let lastError: Error | undefined
 
     for (const method of ['chat.history', 'chat.history.get']) {
@@ -1295,6 +1668,10 @@ export class GatewayLogsClient {
     if (isGatewayEventFrame(payload)) {
       if (payload.event === 'connect.challenge') {
         void this.sendConnectChallengeResponse(payload.payload)
+      }
+      const browserEvent = normalizeGatewayBrowserEvent(payload)
+      if (browserEvent) {
+        browserWsHub.broadcast(browserEvent)
       }
       return
     }
@@ -1503,12 +1880,16 @@ export async function fetchSessions(): Promise<Session[]> {
   return gatewayLogsClient.sessionsList()
 }
 
-export async function fetchChatHistory(sessionKey: string): Promise<ChatHistoryMessage[]> {
+export async function fetchChatHistory(sessionKey: string): Promise<ChatHistoryItem[]> {
   return gatewayLogsClient.chatHistory({ sessionKey })
 }
 
 export async function sendChatMessage(params: { sessionKey: string; message: string; idempotencyKey?: string }): Promise<ChatSendResult> {
   return gatewayLogsClient.chatSend(params)
+}
+
+export async function abortChatRun(params: { sessionKey?: string; runId?: string }): Promise<ChatAbortResult> {
+  return gatewayLogsClient.chatAbort(params)
 }
 
 export async function createPanelSession(agentId: string, title?: string): Promise<SessionCreateResult> {

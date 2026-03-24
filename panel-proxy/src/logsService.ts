@@ -30,7 +30,9 @@ gatewayLogsClient.onConnectionChange((payload) => {
   const envelope: EventEnvelope = {
     type: 'event',
     event: 'system.connection',
+    kind: 'system',
     topic: 'gateway',
+    at: payload.at,
     payload,
   }
   browserWsHub.broadcast(envelope)
@@ -65,7 +67,9 @@ function emitLogsReset(reason: string) {
   const envelope: EventEnvelope = {
     type: 'event',
     event: 'logs.reset',
+    kind: 'logs',
     topic: logsTopic,
+    at: new Date().toISOString(),
     payload,
   }
   broadcastToSubscribers(envelope)
@@ -79,7 +83,9 @@ function emitLogsAppend(lines: LogLine[]) {
   const envelope: EventEnvelope = {
     type: 'event',
     event: 'logs.append',
+    kind: 'logs',
     topic: logsTopic,
+    at: new Date().toISOString(),
     payload,
   }
   broadcastToSubscribers(envelope)
@@ -199,14 +205,18 @@ export async function subscribeSubscriber(ws: WebSocket): Promise<void> {
   sendEvent(ws, {
     type: 'event',
     event: 'logs.reset',
+    kind: 'logs',
     topic: logsTopic,
+    at: new Date().toISOString(),
     payload: { reason: 'subscribed' } satisfies LogsResetPayload,
   })
 
   sendEvent(ws, {
     type: 'event',
     event: 'logs.append',
+    kind: 'logs',
     topic: logsTopic,
+    at: new Date().toISOString(),
     payload: {
       cursor: state.cursor ?? 0,
       lines: state.lines,
@@ -216,7 +226,9 @@ export async function subscribeSubscriber(ws: WebSocket): Promise<void> {
   sendEvent(ws, {
     type: 'event',
     event: 'system.connection',
+    kind: 'system',
     topic: 'gateway',
+    at: gatewayLogsClient.getConnectionSnapshot().at,
     payload: gatewayLogsClient.getConnectionSnapshot(),
   })
 

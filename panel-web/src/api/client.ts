@@ -21,12 +21,27 @@ export type ChatSession = {
   status?: SessionStatus
 }
 
-export type Message = {
-  id: string
-  sessionId: string
-  author: 'agent' | 'user'
-  text: string
+export type ToolInvocationStatus = 'pending' | 'running' | 'done' | 'error'
+
+export type ToolInvocation = {
+  toolName: string
+  toolCallId?: string
+  command?: string
+  arguments?: string
+  result?: string
+  status: ToolInvocationStatus
+  error?: string
+}
+
+export type TranscriptItem = {
+  messageId: string
+  sessionKey: string
+  kind: 'user' | 'assistant' | 'tool' | 'system' | 'error'
+  text?: string
+  createdAt: string
   timestamp: string
+  status?: 'complete' | 'error' | 'aborted'
+  toolInvocation?: ToolInvocation
 }
 
 export type LogEntry = {
@@ -84,12 +99,24 @@ type ProxySession = {
   status?: SessionStatus
 }
 
-type ProxyChatHistoryMessage = {
-  id: string
+type ProxyToolInvocation = {
+  toolName: string
+  toolCallId?: string
+  command?: string
+  arguments?: string
+  result?: string
+  status: ToolInvocationStatus
+  error?: string
+}
+
+type ProxyChatHistoryItem = {
+  messageId: string
   sessionKey: string
-  author: 'agent' | 'user'
-  text: string
+  kind: 'user' | 'assistant' | 'tool' | 'system' | 'error'
   createdAt: string
+  text?: string
+  status?: 'complete' | 'error' | 'aborted'
+  toolInvocation?: ProxyToolInvocation
 }
 
 type ProxyLogLine = {
@@ -167,13 +194,16 @@ export function mapProxySession(session: ProxySession): ChatSession {
   }
 }
 
-export function mapProxyChatHistoryMessage(message: ProxyChatHistoryMessage): Message {
+export function mapProxyChatHistoryMessage(message: ProxyChatHistoryItem): TranscriptItem {
   return {
-    id: message.id,
-    sessionId: message.sessionKey,
-    author: message.author,
+    messageId: message.messageId,
+    sessionKey: message.sessionKey,
+    kind: message.kind,
     text: message.text,
+    createdAt: message.createdAt,
     timestamp: formatClockTime(message.createdAt),
+    status: message.status,
+    toolInvocation: message.toolInvocation,
   }
 }
 
@@ -201,8 +231,8 @@ export async function fetchSessions(agentId: string = 'main'): Promise<ChatSessi
   return sessions.map(mapProxySession)
 }
 
-export async function fetchChatHistory(sessionKey: string): Promise<Message[]> {
-  const messages = await fetchProxyData<ProxyChatHistoryMessage[]>(`/api/chat/${encodeURIComponent(sessionKey)}/history`)
+export async function fetchChatHistory(sessionKey: string): Promise<TranscriptItem[]> {
+  const messages = await fetchProxyData<ProxyChatHistoryItem[]>(`/api/chat/${encodeURIComponent(sessionKey)}/history`)
   return messages.map(mapProxyChatHistoryMessage)
 }
 

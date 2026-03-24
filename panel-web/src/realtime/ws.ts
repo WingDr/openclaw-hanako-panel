@@ -3,7 +3,7 @@ import { panelWsUrl } from '../config'
 type BrowserCommand = {
   id?: string
   type?: 'cmd'
-  cmd: 'chat.send' | 'chat.abort' | 'session.create' | 'session.open' | 'logs.subscribe' | 'logs.unsubscribe'
+  cmd: 'chat.send' | 'chat.abort' | 'chat.inject' | 'session.create' | 'session.open' | 'logs.subscribe' | 'logs.unsubscribe'
   payload?: Record<string, unknown>
 }
 
@@ -21,8 +21,19 @@ type AckEnvelope = {
 
 export type EventEnvelope = {
   type: 'event'
-  event: 'logs.append' | 'logs.reset' | 'system.connection' | 'status.snapshot'
+  event:
+    | 'gateway.chat'
+    | 'gateway.tool'
+    | 'gateway.session'
+    | 'logs.append'
+    | 'logs.reset'
+    | 'system.connection'
+    | 'status.snapshot'
+  kind: 'chat' | 'tool' | 'session' | 'logs' | 'system' | 'status'
   topic?: string
+  at?: string
+  sessionKey?: string
+  runId?: string
   payload: unknown
 }
 
@@ -96,6 +107,18 @@ export class RealtimeClient {
           this.ws = undefined
         }
         this.rejectPending(new Error('WebSocket connection closed'))
+        this.emitEvent({
+          type: 'event',
+          event: 'system.connection',
+          kind: 'system',
+          at: new Date().toISOString(),
+          payload: {
+            source: 'panel',
+            connected: false,
+            at: new Date().toISOString(),
+            message: 'Panel WebSocket connection closed',
+          },
+        })
         settle(() => reject(new Error('WebSocket connection closed before ready')))
       })
     }).finally(() => {
@@ -180,6 +203,12 @@ export class RealtimeClient {
       window.clearTimeout(pending.timeoutId)
       pending.reject(error)
       this.pending.delete(id)
+    }
+  }
+
+  private emitEvent(event: EventEnvelope) {
+    for (const handler of this.handlers) {
+      handler(event)
     }
   }
 }

@@ -1,7 +1,7 @@
 import Fastify from 'fastify'
 import fastifyWebsocket from '@fastify/websocket'
 import type WebSocket from 'ws'
-import { bootstrap, createPanelSession, fetchAgents, fetchAgentSessions, fetchChatHistory, fetchSessions, sendChatMessage } from './gatewayClient'
+import { abortChatRun, bootstrap, createPanelSession, fetchAgents, fetchAgentSessions, fetchChatHistory, fetchSessions, sendChatMessage } from './gatewayClient'
 import { getLogsSnapshot, getLogsStatus, getGatewayConnectionSnapshot, subscribeSubscriber, unsubscribeSubscriber } from './logsService'
 import { browserWsHub } from './browserWsHub'
 import { AckEnvelope, BrowserCommand, HttpOk, Session, StatusResponse } from './types'
@@ -147,7 +147,9 @@ async function main() {
       ws.send(JSON.stringify({
         type: 'event',
         event: 'system.connection',
+        kind: 'system',
         topic: 'gateway',
+        at: getGatewayConnectionSnapshot().at,
         payload: getGatewayConnectionSnapshot(),
       }))
     } catch {
@@ -205,7 +207,28 @@ async function handleEnvelope(ws: WebSocket, envelope: BrowserCommand) {
       break
     }
     case 'chat.abort': {
-      ws.send(JSON.stringify(ack('chat.abort', envelope.id, { accepted: true })))
+      const runId = typeof envelope.payload?.runId === 'string' ? envelope.payload.runId : undefined
+      const sessionKey = typeof envelope.payload?.sessionKey === 'string'
+        ? envelope.payload.sessionKey
+        : typeof envelope.payload?.sessionId === 'string'
+          ? envelope.payload.sessionId
+          : undefined
+
+      if (!runId && !sessionKey) {
+        ws.send(JSON.stringify(ackError('chat.abort', envelope.id, 'invalid_params', 'chat.abort requires runId or sessionKey')))
+        break
+      }
+
+      try {
+        const result = await abortChatRun({ runId, sessionKey })
+        ws.send(JSON.stringify(ack('chat.abort', envelope.id, result)))
+      } catch (error) {
+        ws.send(JSON.stringify(ackError('chat.abort', envelope.id, 'gateway_error', error instanceof Error ? error.message : 'Failed to abort chat run')))
+      }
+      break
+    }
+    case 'chat.inject': {
+      ws.send(JSON.stringify(ackError('chat.inject', envelope.id, 'unsupported', 'chat.inject is not implemented yet')))
       break
     }
     case 'session.create': {
@@ -250,7 +273,7 @@ async function handleEnvelope(ws: WebSocket, envelope: BrowserCommand) {
       break
     }
     default:
-      ws.send(JSON.stringify(ackError('chat.send', envelope.id, 'unknown_command', 'Unknown command')))
+      ws.send(JSON.stringify(ackError(envelope.cmd, envelope.id, 'unknown_command', 'Unknown command')))
   }
 }
 

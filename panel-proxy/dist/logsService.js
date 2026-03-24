@@ -21,7 +21,9 @@ gatewayClient_1.gatewayLogsClient.onConnectionChange((payload) => {
     const envelope = {
         type: 'event',
         event: 'system.connection',
+        kind: 'system',
         topic: 'gateway',
+        at: payload.at,
         payload,
     };
     browserWsHub_1.browserWsHub.broadcast(envelope);
@@ -52,7 +54,9 @@ function emitLogsReset(reason) {
     const envelope = {
         type: 'event',
         event: 'logs.reset',
+        kind: 'logs',
         topic: logsTopic,
+        at: new Date().toISOString(),
         payload,
     };
     broadcastToSubscribers(envelope);
@@ -65,7 +69,9 @@ function emitLogsAppend(lines) {
     const envelope = {
         type: 'event',
         event: 'logs.append',
+        kind: 'logs',
         topic: logsTopic,
+        at: new Date().toISOString(),
         payload,
     };
     broadcastToSubscribers(envelope);
@@ -171,13 +177,17 @@ async function subscribeSubscriber(ws) {
     sendEvent(ws, {
         type: 'event',
         event: 'logs.reset',
+        kind: 'logs',
         topic: logsTopic,
+        at: new Date().toISOString(),
         payload: { reason: 'subscribed' },
     });
     sendEvent(ws, {
         type: 'event',
         event: 'logs.append',
+        kind: 'logs',
         topic: logsTopic,
+        at: new Date().toISOString(),
         payload: {
             cursor: state.cursor ?? 0,
             lines: state.lines,
@@ -186,7 +196,9 @@ async function subscribeSubscriber(ws) {
     sendEvent(ws, {
         type: 'event',
         event: 'system.connection',
+        kind: 'system',
         topic: 'gateway',
+        at: gatewayClient_1.gatewayLogsClient.getConnectionSnapshot().at,
         payload: gatewayClient_1.gatewayLogsClient.getConnectionSnapshot(),
     });
     startPolling();
