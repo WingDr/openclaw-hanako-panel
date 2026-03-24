@@ -619,6 +619,10 @@ button {
   padding: 4px 2px 0;
 }
 
+.pw-chat-hero-compact {
+  justify-content: flex-end;
+}
+
 .pw-chat-hero h1,
 .pw-manage-hero h1 {
   font-size: 2rem;

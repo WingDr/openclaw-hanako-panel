@@ -9,20 +9,27 @@ import {
 
 export type LiveChatState = {
   sessionId: string
+  nodeId?: string
+  nodeOrder?: number
   runId?: string
   text: string
   status: 'streaming'
   startedAt: string
   updatedAt: string
+  seq?: number
 }
 
 export type ToolInvocationCard = ToolInvocation & {
   id: string
   sessionId: string
+  nodeId?: string
+  nodeOrder?: number
   runId?: string
   createdAt: string
   updatedAt: string
   timestamp: string
+  seq?: number
+  anchorTextLength?: number
 }
 
 export type PendingComposerMessage = {
@@ -42,7 +49,7 @@ type State = {
   sessionsByAgent: Record<string, ChatSession[]>
   currentSessionId: string
   historyBySession: Record<string, TranscriptItem[]>
-  liveChatBySession: Record<string, LiveChatState | undefined>
+  liveChatBySession: Record<string, LiveChatState[]>
   toolStreamBySession: Record<string, ToolInvocationCard[]>
   pendingComposerBySession: Record<string, PendingComposerMessage[]>
   setAgents: (agents: AgentSummary[], preferredAgentId?: string) => void
@@ -57,7 +64,15 @@ type State = {
   enqueuePendingComposerMessage: (sessionId: string, text: string) => string
   markPendingComposerAccepted: (sessionId: string, messageId: string, runId?: string) => void
   markPendingComposerFailed: (sessionId: string, messageId: string, error?: string) => void
-  setLiveChat: (sessionId: string, params: { runId?: string; text: string; updatedAt?: string; startedAt?: string }) => void
+  setLiveChat: (sessionId: string, params: {
+    nodeId?: string
+    nodeOrder?: number
+    runId?: string
+    text: string
+    updatedAt?: string
+    startedAt?: string
+    seq?: number
+  }) => void
   commitLiveChat: (sessionId: string, params?: { runId?: string; text?: string; updatedAt?: string; messageId?: string }) => void
   failLiveChat: (sessionId: string, params: { runId?: string; error: string; aborted?: boolean; updatedAt?: string }) => void
   upsertToolInvocation: (sessionId: string, tool: Omit<ToolInvocationCard, 'sessionId' | 'timestamp'> & { timestamp?: string }) => void
@@ -175,6 +190,34 @@ const areSessionsEqual = (left: ChatSession[], right: ChatSession[]): boolean =>
   })
 }
 
+const areStringListsEqual = (left: string[], right: string[]): boolean => {
+  if (left.length !== right.length) {
+    return false
+  }
+
+  return left.every((value, index) => value === right[index])
+}
+
+const areAgentsEqual = (left: AgentSummary[], right: AgentSummary[]): boolean => {
+  if (left.length !== right.length) {
+    return false
+  }
+
+  return left.every((agent, index) => {
+    const next = right[index]
+    if (!next) {
+      return false
+    }
+
+    return (
+      agent.id === next.id
+      && agent.name === next.name
+      && agent.status === next.status
+      && areStringListsEqual(agent.capabilities, next.capabilities)
+    )
+  })
+}
+
 const appendTranscriptItems = (
   existing: TranscriptItem[],
   nextItems: TranscriptItem[],
@@ -250,6 +293,46 @@ const buildErrorTranscriptItem = (
   status: aborted ? 'aborted' : 'error',
 })
 
+const buildToolTranscriptItems = (
+  sessionId: string,
+  tools: ToolInvocationCard[],
+  outcome: 'success' | 'error' | 'aborted',
+): TranscriptItem[] => tools
+  .map((tool) => {
+    const createdAt = tool.createdAt || tool.updatedAt || isoNow()
+    const normalizedStatus = tool.status === 'error'
+      ? 'error'
+      : outcome === 'success'
+        ? 'done'
+        : 'error'
+    const transcriptStatus: TranscriptItem['status'] = tool.status === 'error'
+      ? 'error'
+      : outcome === 'aborted'
+        ? 'aborted'
+        : outcome === 'error'
+          ? 'error'
+          : 'complete'
+
+    return {
+      messageId: tool.id,
+      sessionKey: sessionId,
+      kind: 'tool',
+      text: tool.result || tool.error || undefined,
+      createdAt,
+      timestamp: timestampFor(createdAt),
+      status: transcriptStatus,
+      toolInvocation: {
+        toolName: tool.toolName,
+        toolCallId: tool.toolCallId,
+        command: tool.command,
+        arguments: tool.arguments,
+        result: tool.result,
+        status: normalizedStatus,
+        error: tool.error,
+      },
+    } satisfies TranscriptItem
+  })
+
 export const useChatStore = create<State>((set) => ({
   agents: [],
   currentAgentId: '',
@@ -266,12 +349,21 @@ export const useChatStore = create<State>((set) => ({
         ? preferredAgentId
         : agents[0]?.id || ''
     const nextSessions = state.sessionsByAgent[preferred] ?? []
+    const nextCurrentSessionId = resolveCurrentSessionId(state.currentSessionId, nextSessions)
+
+    if (
+      areAgentsEqual(state.agents, agents)
+      && state.currentAgentId === preferred
+      && state.currentSessionId === nextCurrentSessionId
+    ) {
+      return state
+    }
 
     return {
       ...state,
       agents,
       currentAgentId: preferred,
-      currentSessionId: resolveCurrentSessionId(state.currentSessionId, nextSessions),
+      currentSessionId: nextCurrentSessionId,
     }
   }),
   setCurrentAgentId: (id) => set((state) => ({
@@ -378,7 +470,7 @@ export const useChatStore = create<State>((set) => ({
     ...state,
     liveChatBySession: {
       ...state.liveChatBySession,
-      [sessionId]: undefined,
+      [sessionId]: [],
     },
     toolStreamBySession: {
       ...state.toolStreamBySession,
@@ -449,31 +541,106 @@ export const useChatStore = create<State>((set) => ({
     },
   })),
   setLiveChat: (sessionId, params) => set((state) => {
-    const existing = state.liveChatBySession[sessionId]
-    const startedAt = params.startedAt || existing?.startedAt || params.updatedAt || isoNow()
-    const updatedAt = params.updatedAt || isoNow()
+    const currentSegments = state.liveChatBySession[sessionId] ?? []
+    const segmentIdentity = params.nodeId || (params.runId ? `run:${params.runId}` : undefined)
+    const existingIndex = segmentIdentity
+      ? currentSegments.findIndex((segment) => (
+          (segment.nodeId && segment.nodeId === segmentIdentity)
+          || (!segment.nodeId && segment.runId && `run:${segment.runId}` === segmentIdentity)
+        ))
+      : currentSegments.length - 1
+
+    if (existingIndex >= 0) {
+      const existing = currentSegments[existingIndex]
+      if (
+        existing
+        && existing.seq !== undefined
+        && params.seq !== undefined
+        && params.seq <= existing.seq
+      ) {
+        return state
+      }
+
+      const updatedAt = params.updatedAt || isoNow()
+      const startedAt = params.startedAt || existing.startedAt || updatedAt
+      const updatedSegment: LiveChatState = {
+        ...existing,
+        sessionId,
+        nodeId: params.nodeId ?? existing.nodeId,
+        nodeOrder: params.nodeOrder ?? existing.nodeOrder,
+        runId: params.runId ?? existing.runId,
+        text: params.text,
+        status: 'streaming',
+        startedAt,
+        updatedAt,
+        seq: params.seq ?? existing.seq,
+      }
+
+      const nextSegments = currentSegments.slice()
+      nextSegments[existingIndex] = updatedSegment
+      nextSegments.sort((left, right) => {
+        const leftOrder = left.nodeOrder ?? Number.MAX_SAFE_INTEGER
+        const rightOrder = right.nodeOrder ?? Number.MAX_SAFE_INTEGER
+        if (leftOrder === rightOrder) {
+          return left.startedAt < right.startedAt ? -1 : left.startedAt > right.startedAt ? 1 : 0
+        }
+
+        return leftOrder - rightOrder
+      })
+
+      return {
+        ...state,
+        liveChatBySession: {
+          ...state.liveChatBySession,
+          [sessionId]: nextSegments,
+        },
+      }
+    }
+
+    const createdAt = params.updatedAt || isoNow()
+    const created: LiveChatState = {
+      sessionId,
+      nodeId: params.nodeId,
+      nodeOrder: params.nodeOrder,
+      runId: params.runId,
+      text: params.text,
+      status: 'streaming',
+      startedAt: params.startedAt || createdAt,
+      updatedAt: createdAt,
+      seq: params.seq,
+    }
+
+    const nextSegments = [...currentSegments, created]
+    nextSegments.sort((left, right) => {
+      const leftOrder = left.nodeOrder ?? Number.MAX_SAFE_INTEGER
+      const rightOrder = right.nodeOrder ?? Number.MAX_SAFE_INTEGER
+      if (leftOrder === rightOrder) {
+        return left.startedAt < right.startedAt ? -1 : left.startedAt > right.startedAt ? 1 : 0
+      }
+
+      return leftOrder - rightOrder
+    })
 
     return {
       ...state,
       liveChatBySession: {
         ...state.liveChatBySession,
-        [sessionId]: {
-          sessionId,
-          runId: params.runId ?? existing?.runId,
-          text: params.text,
-          status: 'streaming',
-          startedAt,
-          updatedAt,
-        },
+        [sessionId]: nextSegments,
       },
     }
   }),
   commitLiveChat: (sessionId, params) => set((state) => {
-    const existingLive = state.liveChatBySession[sessionId]
-    const finalizedAt = params?.updatedAt || existingLive?.updatedAt || isoNow()
-    const finalText = params?.text ?? existingLive?.text ?? ''
+    const liveSegments = state.liveChatBySession[sessionId] ?? []
+    const latestSegment = liveSegments[liveSegments.length - 1]
+    const finalizedAt = params?.updatedAt || latestSegment?.updatedAt || isoNow()
+    const fallbackLiveText = liveSegments.map((segment) => segment.text || '').join('')
+    const finalText = params?.text ?? fallbackLiveText
     const { nextPendingBySession, transcriptItems: consumedPendingItems } = consumePendingComposerMessages(state, sessionId)
-    const nextItems = [...consumedPendingItems]
+    const streamedTools = state.toolStreamBySession[sessionId] ?? []
+    const nextItems = [
+      ...consumedPendingItems,
+      ...buildToolTranscriptItems(sessionId, streamedTools, 'success'),
+    ]
 
     if (finalText.trim()) {
       nextItems.push(buildAssistantTranscriptItem(sessionId, finalText, finalizedAt, {
@@ -490,7 +657,7 @@ export const useChatStore = create<State>((set) => ({
       pendingComposerBySession: nextPendingBySession,
       liveChatBySession: {
         ...state.liveChatBySession,
-        [sessionId]: undefined,
+        [sessionId]: [],
       },
       toolStreamBySession: {
         ...state.toolStreamBySession,
@@ -499,13 +666,19 @@ export const useChatStore = create<State>((set) => ({
     }
   }),
   failLiveChat: (sessionId, params) => set((state) => {
-    const existingLive = state.liveChatBySession[sessionId]
-    const failedAt = params.updatedAt || existingLive?.updatedAt || isoNow()
+    const liveSegments = state.liveChatBySession[sessionId] ?? []
+    const latestSegment = liveSegments[liveSegments.length - 1]
+    const failedAt = params.updatedAt || latestSegment?.updatedAt || isoNow()
+    const fallbackLiveText = liveSegments.map((segment) => segment.text || '').join('')
     const { nextPendingBySession, transcriptItems: consumedPendingItems } = consumePendingComposerMessages(state, sessionId)
-    const nextItems = [...consumedPendingItems]
+    const streamedTools = state.toolStreamBySession[sessionId] ?? []
+    const nextItems = [
+      ...consumedPendingItems,
+      ...buildToolTranscriptItems(sessionId, streamedTools, params.aborted ? 'aborted' : 'error'),
+    ]
 
-    if (existingLive?.text?.trim()) {
-      nextItems.push(buildAssistantTranscriptItem(sessionId, existingLive.text, failedAt, {
+    if (fallbackLiveText.trim()) {
+      nextItems.push(buildAssistantTranscriptItem(sessionId, fallbackLiveText, failedAt, {
         status: params.aborted ? 'aborted' : 'error',
       }))
     } else {
@@ -521,7 +694,7 @@ export const useChatStore = create<State>((set) => ({
       pendingComposerBySession: nextPendingBySession,
       liveChatBySession: {
         ...state.liveChatBySession,
-        [sessionId]: undefined,
+        [sessionId]: [],
       },
       toolStreamBySession: {
         ...state.toolStreamBySession,
@@ -533,23 +706,46 @@ export const useChatStore = create<State>((set) => ({
     const toolId = tool.id || tool.toolCallId || `tool:${tool.runId || sessionId}:${tool.toolName}:${tool.createdAt}`
     const updatedAt = tool.updatedAt || isoNow()
     const createdAt = tool.createdAt || updatedAt
-    const nextTool: ToolInvocationCard = {
+    const incomingTool: ToolInvocationCard = {
       ...tool,
       id: toolId,
       sessionId,
       createdAt,
       updatedAt,
       timestamp: tool.timestamp || timestampFor(updatedAt),
+      seq: tool.seq,
     }
 
     const currentTools = state.toolStreamBySession[sessionId] ?? []
-    const nextTools = currentTools.some((item) => item.id === toolId || (item.toolCallId && item.toolCallId === nextTool.toolCallId))
-      ? currentTools.map((item) => (
-          item.id === toolId || (item.toolCallId && item.toolCallId === nextTool.toolCallId)
-            ? nextTool
-            : item
-        ))
-      : [...currentTools, nextTool]
+    const nextTools = currentTools.some((item) => item.id === toolId || (item.toolCallId && item.toolCallId === incomingTool.toolCallId))
+      ? currentTools.map((item) => {
+          if (!(item.id === toolId || (item.toolCallId && item.toolCallId === incomingTool.toolCallId))) {
+            return item
+          }
+
+          if (
+            item.seq !== undefined
+            && incomingTool.seq !== undefined
+            && incomingTool.seq <= item.seq
+          ) {
+            return item
+          }
+
+          return {
+            ...item,
+            ...incomingTool,
+            command: incomingTool.command ?? item.command,
+            arguments: incomingTool.arguments ?? item.arguments,
+            result: incomingTool.result ?? item.result,
+            error: incomingTool.error ?? item.error,
+            createdAt: item.createdAt || incomingTool.createdAt,
+            updatedAt: incomingTool.updatedAt,
+            timestamp: incomingTool.timestamp || item.timestamp,
+            seq: incomingTool.seq ?? item.seq,
+            anchorTextLength: item.anchorTextLength ?? incomingTool.anchorTextLength,
+          }
+        })
+      : [...currentTools, incomingTool]
 
     return {
       ...state,
@@ -563,7 +759,7 @@ export const useChatStore = create<State>((set) => ({
     ...state,
     liveChatBySession: {
       ...state.liveChatBySession,
-      [sessionId]: undefined,
+      [sessionId]: [],
     },
     toolStreamBySession: {
       ...state.toolStreamBySession,
@@ -574,8 +770,8 @@ export const useChatStore = create<State>((set) => ({
     const nextHistoryBySession = { ...state.historyBySession }
     const nextPendingBySession = { ...state.pendingComposerBySession }
 
-    for (const [sessionId, liveChat] of Object.entries(state.liveChatBySession)) {
-      if (!liveChat) {
+    for (const [sessionId, liveSegments] of Object.entries(state.liveChatBySession)) {
+      if (!liveSegments || liveSegments.length === 0) {
         continue
       }
 
@@ -584,15 +780,21 @@ export const useChatStore = create<State>((set) => ({
         sessionId,
       )
       Object.assign(nextPendingBySession, consumedPending)
+      const streamedTools = state.toolStreamBySession[sessionId] ?? []
+      const liveText = liveSegments.map((segment) => segment.text || '').join('')
+      const latestSegment = liveSegments[liveSegments.length - 1]
+      const updatedAt = latestSegment?.updatedAt || isoNow()
 
-      const nextItems = liveChat.text.trim()
+      const nextItems = liveText.trim()
         ? [
             ...consumedPendingItems,
-            buildAssistantTranscriptItem(sessionId, liveChat.text, liveChat.updatedAt, { status: 'error' }),
+            ...buildToolTranscriptItems(sessionId, streamedTools, 'error'),
+            buildAssistantTranscriptItem(sessionId, liveText, updatedAt, { status: 'error' }),
           ]
         : [
             ...consumedPendingItems,
-            buildErrorTranscriptItem(sessionId, error, liveChat.updatedAt),
+            ...buildToolTranscriptItems(sessionId, streamedTools, 'error'),
+            buildErrorTranscriptItem(sessionId, error, updatedAt),
           ]
 
       nextHistoryBySession[sessionId] = appendTranscriptItems(nextHistoryBySession[sessionId] ?? [], nextItems)
@@ -603,7 +805,7 @@ export const useChatStore = create<State>((set) => ({
       historyBySession: nextHistoryBySession,
       pendingComposerBySession: nextPendingBySession,
       liveChatBySession: Object.fromEntries(
-        Object.keys(state.liveChatBySession).map((sessionId) => [sessionId, undefined]),
+        Object.keys(state.liveChatBySession).map((sessionId) => [sessionId, []]),
       ),
       toolStreamBySession: Object.fromEntries(
         Object.keys(state.toolStreamBySession).map((sessionId) => [sessionId, []]),

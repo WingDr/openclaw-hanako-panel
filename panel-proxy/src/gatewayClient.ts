@@ -4,8 +4,8 @@ import os from 'node:os'
 import path from 'node:path'
 import tls from 'node:tls'
 import WebSocket from 'ws'
-import { browserWsHub } from './browserWsHub'
 import { Agent, BootstrapResponse, ChatHistoryItem, GatewayConnectionPayload, LogLine, Session, ToolInvocation, ToolInvocationStatus } from './types'
+import { chatStreamCoordinator } from './streaming/chat/ChatStreamCoordinator'
 
 const openClawConfigPath = path.join(os.homedir(), '.openclaw', 'openclaw.json')
 const openClawDeviceIdentityPath = path.join(os.homedir(), '.openclaw', 'identity', 'device.json')
@@ -1613,7 +1613,7 @@ export class GatewayLogsClient {
     return {
       accepted: true,
       sessionKey: asString(record?.sessionKey) ?? params.sessionKey,
-      runId: asString(record?.runId) ?? asString(record?.id),
+      runId: asString(pickFirst(record ?? {}, ['runId', 'responseId', 'chatId'])),
     }
   }
 
@@ -1803,7 +1803,7 @@ export class GatewayLogsClient {
       }
       const browserEvent = normalizeGatewayBrowserEvent(payload)
       if (browserEvent) {
-        browserWsHub.broadcast(browserEvent)
+        chatStreamCoordinator.handleGatewayEvent(browserEvent)
       }
       return
     }

@@ -3,7 +3,7 @@ import { panelWsUrl } from '../config'
 type BrowserCommand = {
   id?: string
   type?: 'cmd'
-  cmd: 'chat.send' | 'chat.abort' | 'chat.inject' | 'session.create' | 'session.open' | 'logs.subscribe' | 'logs.unsubscribe'
+  cmd: 'chat.send' | 'chat.abort' | 'chat.inject' | 'session.create' | 'session.open' | 'sync.bootstrap' | 'logs.subscribe' | 'logs.unsubscribe'
   payload?: Record<string, unknown>
 }
 
@@ -25,11 +25,12 @@ export type EventEnvelope = {
     | 'gateway.chat'
     | 'gateway.tool'
     | 'gateway.session'
+    | 'chat.sync.required'
     | 'logs.append'
     | 'logs.reset'
     | 'system.connection'
     | 'status.snapshot'
-  kind: 'chat' | 'tool' | 'session' | 'logs' | 'system' | 'status'
+  kind: 'chat' | 'tool' | 'session' | 'sync' | 'logs' | 'system' | 'status'
   topic?: string
   at?: string
   sessionKey?: string
@@ -91,6 +92,18 @@ export class RealtimeClient {
 
       ws.addEventListener('open', () => {
         this.ws = ws
+        this.emitEvent({
+          type: 'event',
+          event: 'system.connection',
+          kind: 'system',
+          at: new Date().toISOString(),
+          payload: {
+            source: 'panel',
+            connected: true,
+            at: new Date().toISOString(),
+            message: 'Panel WebSocket connected',
+          },
+        })
         settle(resolve)
       })
 

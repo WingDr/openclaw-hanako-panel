@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { fetchAgents, fetchBootstrap, fetchSessions, formatRelativeTime, type ChatSession } from '../api/client'
-import { panelRealtime } from '../realtime/ws'
 import { useChatStore } from '../store'
 
 const statusLabelTone: Record<string, string> = {
@@ -95,6 +94,14 @@ function splitSessionsByKind(agentId: string, agentSessions: ChatSession[]) {
   return { regularSessions, channelGroups }
 }
 
+function areStringArraysEqual(left: string[], right: string[]): boolean {
+  if (left.length !== right.length) {
+    return false
+  }
+
+  return left.every((value, index) => value === right[index])
+}
+
 export default function Shell({ children }: { children?: React.ReactNode }) {
   const location = useLocation()
   const agents = useChatStore((state) => state.agents)
@@ -161,12 +168,21 @@ export default function Shell({ children }: { children?: React.ReactNode }) {
 
   useEffect(() => {
     const validAgentIds = new Set(agents.map((agent) => agent.id))
-    setExpandedAgentIds((currentIds) => currentIds.filter((id) => validAgentIds.has(id)))
-    setExpandedChannelAgentIds((currentIds) => currentIds.filter((id) => validAgentIds.has(id)))
-    setExpandedChannelGroupIds((currentIds) => currentIds.filter((id) => {
-      const [agentId] = id.split('::')
-      return validAgentIds.has(agentId)
-    }))
+    setExpandedAgentIds((currentIds) => {
+      const nextIds = currentIds.filter((id) => validAgentIds.has(id))
+      return areStringArraysEqual(currentIds, nextIds) ? currentIds : nextIds
+    })
+    setExpandedChannelAgentIds((currentIds) => {
+      const nextIds = currentIds.filter((id) => validAgentIds.has(id))
+      return areStringArraysEqual(currentIds, nextIds) ? currentIds : nextIds
+    })
+    setExpandedChannelGroupIds((currentIds) => {
+      const nextIds = currentIds.filter((id) => {
+        const [agentId] = id.split('::')
+        return validAgentIds.has(agentId)
+      })
+      return areStringArraysEqual(currentIds, nextIds) ? currentIds : nextIds
+    })
   }, [agents])
 
   useEffect(() => {
@@ -212,7 +228,9 @@ export default function Shell({ children }: { children?: React.ReactNode }) {
       }
     }
 
-    void Promise.all(targetAgentIds.map((agentId) => loadSessionsForAgent(agentId)))
+    void Promise.all(targetAgentIds.map((agentId) => loadSessionsForAgent(agentId, {
+      silent: (sessionsByAgent[agentId]?.length ?? 0) > 0,
+    })))
     const intervalId = window.setInterval(() => {
       void Promise.all(targetAgentIds.map((agentId) => loadSessionsForAgent(agentId, { silent: true })))
     }, 10_000)
@@ -253,9 +271,6 @@ export default function Shell({ children }: { children?: React.ReactNode }) {
     }
 
     setSessionId(sessionId)
-    void panelRealtime.sendCommand('session.open', { sessionKey: sessionId }).catch((error) => {
-      setSidebarError(error instanceof Error ? error.message : 'Failed to open session')
-    })
   }
 
   return (

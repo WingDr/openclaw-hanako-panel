@@ -6,6 +6,8 @@ import { getLogsSnapshot, getLogsStatus, getGatewayConnectionSnapshot, subscribe
 import { browserWsHub } from './browserWsHub'
 import { AckEnvelope, BrowserCommand, HttpOk, Session, StatusResponse } from './types'
 import { snapshotStatus } from './statusService'
+import { chatStreamCoordinator } from './streaming/chat/ChatStreamCoordinator'
+import { syncBootstrapCoordinator } from './streaming/chat/SyncBootstrapCoordinator'
 
 const defaultPort = 22846
 
@@ -28,6 +30,18 @@ const port = parsePort(process.env.PANEL_PROXY_PORT, process.env.PORT)
 
 type AgentSessionsParams = { agentId: string }
 type ChatHistoryParams = { sessionKey: string }
+
+const asSessionKeyList = (value: unknown): string[] => {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  const keys = value
+    .map((entry) => typeof entry === 'string' ? entry.trim() : '')
+    .filter((entry) => entry.length > 0)
+
+  return [...new Set(keys)].slice(0, 20)
+}
 
 const ack = (action: BrowserCommand['cmd'], id?: string, result?: Record<string, unknown>): AckEnvelope => ({
   id,
@@ -143,6 +157,7 @@ async function main() {
   app.get('/ws', { websocket: true }, (socket, _request) => {
     const ws: WebSocket = socket
     browserWsHub.addClient(ws)
+    chatStreamCoordinator.registerClient(ws)
     try {
       ws.send(JSON.stringify({
         type: 'event',
@@ -169,6 +184,7 @@ async function main() {
     ws.on('close', () => {
       unsubscribeSubscriber(ws)
       browserWsHub.removeClient(ws)
+      chatStreamCoordinator.unregisterClient(ws)
     })
   })
 
@@ -198,10 +214,18 @@ async function handleEnvelope(ws: WebSocket, envelope: BrowserCommand) {
         break
       }
 
+      const gate = chatStreamCoordinator.beforeChatSend(ws, sessionKey, message)
+      if (!gate.ok) {
+        ws.send(JSON.stringify(ackError('chat.send', envelope.id, gate.code, gate.message)))
+        break
+      }
+
       try {
         const result = await sendChatMessage({ sessionKey, message, idempotencyKey })
+        chatStreamCoordinator.afterChatSendAck(sessionKey, typeof result.runId === 'string' ? result.runId : undefined)
         ws.send(JSON.stringify(ack('chat.send', envelope.id, result)))
       } catch (error) {
+        chatStreamCoordinator.afterChatSendFailure(sessionKey)
         ws.send(JSON.stringify(ackError('chat.send', envelope.id, 'gateway_error', error instanceof Error ? error.message : 'Failed to send chat message')))
       }
       break
@@ -219,8 +243,15 @@ async function handleEnvelope(ws: WebSocket, envelope: BrowserCommand) {
         break
       }
 
+      const gate = chatStreamCoordinator.beforeChatAbort(ws, { runId, sessionKey })
+      if (!gate.ok) {
+        ws.send(JSON.stringify(ackError('chat.abort', envelope.id, gate.code, gate.message)))
+        break
+      }
+
       try {
         const result = await abortChatRun({ runId, sessionKey })
+        chatStreamCoordinator.afterChatAbortAck({ runId, sessionKey })
         ws.send(JSON.stringify(ack('chat.abort', envelope.id, result)))
       } catch (error) {
         ws.send(JSON.stringify(ackError('chat.abort', envelope.id, 'gateway_error', error instanceof Error ? error.message : 'Failed to abort chat run')))
@@ -254,7 +285,60 @@ async function handleEnvelope(ws: WebSocket, envelope: BrowserCommand) {
         break
       }
 
-      ws.send(JSON.stringify(ack('session.open', envelope.id, { accepted: true, sessionKey })))
+      const gate = chatStreamCoordinator.handleSessionOpen(ws, sessionKey)
+      if (!gate.ok) {
+        ws.send(JSON.stringify(ackError('session.open', envelope.id, gate.code, gate.message)))
+        break
+      }
+
+      ws.send(JSON.stringify(ack('session.open', envelope.id, { accepted: true, sessionKey, subscribed: true })))
+      break
+    }
+    case 'sync.bootstrap': {
+      const payload = envelope.payload ?? {}
+      const directSessionKeys = asSessionKeyList(payload.sessionKeys)
+      const selectedSessionKey = typeof payload.sessionKey === 'string' && payload.sessionKey.trim()
+        ? payload.sessionKey.trim()
+        : ''
+      const includeCatalog = payload.includeCatalog === true
+      const subscribedSessions = chatStreamCoordinator.getSubscribedSessions(ws)
+      const sessionKeys = [...new Set([
+        ...directSessionKeys,
+        ...(selectedSessionKey ? [selectedSessionKey] : []),
+        ...subscribedSessions,
+      ])]
+
+      try {
+        const [catalog, sessionSnapshots] = await Promise.all([
+          syncBootstrapCoordinator.resolveCatalogSnapshot(
+            includeCatalog,
+            async () => {
+              const [agents, sessions] = await Promise.all([fetchAgents(), fetchSessions()])
+              return { agents, sessions }
+            },
+          ),
+          syncBootstrapCoordinator.resolveSessionSnapshots(
+            sessionKeys,
+            (sessionKey) => chatStreamCoordinator.getSessionRuntimeSnapshot(sessionKey),
+            async (sessionKey) => await fetchChatHistory(sessionKey),
+          ),
+        ])
+
+        ws.send(JSON.stringify(ack('sync.bootstrap', envelope.id, {
+          accepted: true,
+          at: new Date().toISOString(),
+          agents: catalog?.agents ?? [],
+          sessions: catalog?.sessions ?? [],
+          sessionSnapshots,
+        })))
+      } catch (error) {
+        ws.send(JSON.stringify(ackError(
+          'sync.bootstrap',
+          envelope.id,
+          'gateway_error',
+          error instanceof Error ? error.message : 'Failed to bootstrap sync',
+        )))
+      }
       break
     }
     case 'logs.subscribe': {

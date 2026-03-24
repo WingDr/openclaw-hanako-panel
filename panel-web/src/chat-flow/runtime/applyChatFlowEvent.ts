@@ -1,6 +1,6 @@
-import type { ChatSession } from '../api/client'
-import { useChatStore } from '../store'
-import type { EventEnvelope } from './ws'
+import type { ChatSession } from '../../api/client'
+import { useChatStore } from '../../store'
+import type { EventEnvelope } from '../../realtime/ws'
 
 const asRecord = (value: unknown): Record<string, unknown> | undefined => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -13,6 +13,19 @@ const asRecord = (value: unknown): Record<string, unknown> | undefined => {
 const asString = (value: unknown): string | undefined => (
   typeof value === 'string' && value.trim() ? value.trim() : undefined
 )
+
+const asFiniteNumber = (value: unknown): number | undefined => {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value
+  }
+
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : undefined
+  }
+
+  return undefined
+}
 
 const inferAgentIdFromSessionKey = (sessionKey: string): string | undefined => {
   const match = sessionKey.match(/^agent:([^:]+):/)
@@ -110,6 +123,108 @@ const inferToolStatus = (payload: Record<string, unknown>): 'pending' | 'running
   return 'running'
 }
 
+const normalizeToolStatusFromChatPhase = (
+  chatPhase: 'streaming' | 'done' | 'error' | 'aborted',
+  fallback: 'pending' | 'running' | 'done' | 'error',
+): 'pending' | 'running' | 'done' | 'error' => {
+  if (chatPhase === 'error' || chatPhase === 'aborted') {
+    return 'error'
+  }
+
+  if (chatPhase === 'done') {
+    return 'done'
+  }
+
+  return fallback
+}
+
+type ToolPatch = {
+  toolCallId?: string
+  toolName: string
+  command?: string
+  argumentsText?: string
+  result?: string
+  error?: string
+  status: 'pending' | 'running' | 'done' | 'error'
+}
+
+const extractToolPatch = (
+  payload: Record<string, unknown>,
+  options?: { chatPhase?: 'streaming' | 'done' | 'error' | 'aborted' },
+): ToolPatch | undefined => {
+  const toolCallId = asString(payload.toolCallId) ?? asString(payload.toolId) ?? asString(payload.callId)
+  const toolNameRaw = asString(payload.toolName) ?? asString(payload.tool) ?? asString(payload.name)
+  const command = asString(payload.toolCommand) ?? asString(payload.command) ?? asString(payload.cmd)
+  const argumentsText = asString(payload.toolArguments) ?? asString(payload.arguments) ?? asString(payload.args)
+  const result = asString(payload.toolResult) ?? asString(payload.result) ?? asString(payload.output)
+  const error = asString(payload.errorMessage) ?? asString(asRecord(payload.error)?.message)
+  const gatewayEvent = asString(payload.gatewayEvent)?.toLowerCase() ?? ''
+  const lifecycle = asString(payload.phase ?? payload.status ?? payload.state ?? payload.event)?.toLowerCase() ?? ''
+
+  const hasToolSignal = Boolean(
+    toolCallId
+    || toolNameRaw
+    || command
+    || argumentsText
+    || result
+    || gatewayEvent.includes('tool')
+    || gatewayEvent.includes('function')
+    || lifecycle.includes('tool')
+    || lifecycle.includes('function')
+  )
+
+  if (!hasToolSignal) {
+    return undefined
+  }
+
+  const inferredStatus = inferToolStatus(payload)
+  const status = options?.chatPhase
+    ? normalizeToolStatusFromChatPhase(options.chatPhase, inferredStatus)
+    : inferredStatus
+
+  const stableResult = status === 'running'
+    ? undefined
+    : result
+
+  return {
+    toolCallId,
+    toolName: toolNameRaw ?? 'Tool',
+    command,
+    argumentsText,
+    result: stableResult,
+    error,
+    status,
+  }
+}
+
+const upsertToolPatch = (
+  sessionKey: string,
+  nodeId: string | undefined,
+  nodeOrder: number | undefined,
+  runId: string | undefined,
+  updatedAt: string,
+  seq: number | undefined,
+  patch: ToolPatch,
+) => {
+  const store = useChatStore.getState()
+  store.upsertToolInvocation(sessionKey, {
+    id: patch.toolCallId ? `tool:${sessionKey}:${patch.toolCallId}` : `tool:${sessionKey}:${patch.toolName}:${updatedAt}`,
+    nodeId,
+    nodeOrder,
+    runId,
+    toolCallId: patch.toolCallId,
+    toolName: patch.toolName,
+    command: patch.command,
+    arguments: patch.argumentsText,
+    result: patch.result,
+    status: patch.status,
+    error: patch.error,
+    createdAt: updatedAt,
+    updatedAt,
+    seq,
+  })
+}
+
 const mergeStreamingText = (
   currentText: string,
   payload: Record<string, unknown>,
@@ -152,7 +267,41 @@ const mergeStreamingText = (
   return `${currentText}${deltaText}`
 }
 
-export function handleChatRealtimeEvent(event: EventEnvelope) {
+const resolveRunOwnership = (
+  sessionKey: string,
+): { liveRunId?: string; pendingAcceptedRunId?: string } => {
+  const store = useChatStore.getState()
+  const liveSegments = store.liveChatBySession[sessionKey] ?? []
+  const pendingAcceptedRunId = (store.pendingComposerBySession[sessionKey] ?? [])
+    .find((message) => message.status === 'accepted' && message.runId)
+    ?.runId
+
+  return {
+    liveRunId: liveSegments[liveSegments.length - 1]?.runId,
+    pendingAcceptedRunId,
+  }
+}
+
+const shouldIgnoreRunMismatchedEvent = (
+  sessionKey: string,
+  incomingRunId?: string,
+): boolean => {
+  if (!incomingRunId) {
+    return false
+  }
+
+  const ownership = resolveRunOwnership(sessionKey)
+
+  // Once we already entered live streaming for a run, reject late events from other runs.
+  if (ownership.liveRunId) {
+    return ownership.liveRunId !== incomingRunId
+  }
+
+  // Before streaming starts, ack runId may be absent or non-authoritative; accept the first stream run.
+  return false
+}
+
+export function applyChatFlowEvent(event: EventEnvelope) {
   const payload = asRecord(event.payload)
   if (!payload) {
     return
@@ -162,6 +311,10 @@ export function handleChatRealtimeEvent(event: EventEnvelope) {
   const sessionKey = event.sessionKey ?? asString(payload.sessionKey) ?? asString(payload.sessionId)
   const runId = event.runId ?? asString(payload.runId)
   const updatedAt = event.at ?? asString(payload.updatedAt) ?? new Date().toISOString()
+  const eventSeq = asFiniteNumber(payload.proxySessionSeq)
+  const proxyNodeId = asString(payload.proxyNodeId)
+  const proxyNodeOrder = asFiniteNumber(payload.proxyNodeOrder)
+  const proxyNodeKind = asString(payload.proxyNodeKind)
 
   if (event.event === 'system.connection') {
     const connected = payload.connected === true
@@ -185,9 +338,18 @@ export function handleChatRealtimeEvent(event: EventEnvelope) {
   }
 
   if (event.event === 'gateway.chat') {
-    const currentLiveText = store.liveChatBySession[sessionKey]?.text ?? ''
-    const nextText = mergeStreamingText(currentLiveText, payload)
     const phase = inferChatPhase(payload)
+
+    if (shouldIgnoreRunMismatchedEvent(sessionKey, runId)) {
+      return
+    }
+
+    const liveSegments = store.liveChatBySession[sessionKey] ?? []
+    const currentSegment = proxyNodeId
+      ? liveSegments.find((segment) => segment.nodeId === proxyNodeId)
+      : liveSegments[liveSegments.length - 1]
+    const currentLiveText = currentSegment?.text ?? ''
+    const nextText = mergeStreamingText(currentLiveText, payload)
 
     store.markSessionOpened(sessionKey, updatedAt)
 
@@ -218,36 +380,44 @@ export function handleChatRealtimeEvent(event: EventEnvelope) {
     }
 
     store.setLiveChat(sessionKey, {
+      nodeId: proxyNodeId,
+      nodeOrder: proxyNodeOrder,
       runId,
       text: nextText,
       updatedAt,
       startedAt: asString(payload.startedAt) ?? updatedAt,
+      seq: eventSeq,
     })
     return
   }
 
   if (event.event === 'gateway.tool') {
-    const toolCallId = asString(payload.toolCallId) ?? asString(payload.toolId) ?? asString(payload.callId)
-    const toolName = asString(payload.toolName) ?? asString(payload.tool) ?? asString(payload.name) ?? 'Tool'
-    const result = asString(payload.toolResult) ?? asString(payload.result) ?? asString(payload.output) ?? asString(payload.text)
-    const command = asString(payload.toolCommand) ?? asString(payload.command) ?? asString(payload.cmd)
-    const argumentsText = asString(payload.toolArguments) ?? asString(payload.arguments) ?? asString(payload.args)
-    const status = inferToolStatus(payload)
-    const error = asString(payload.errorMessage) ?? asString(asRecord(payload.error)?.message)
+    if (shouldIgnoreRunMismatchedEvent(sessionKey, runId)) {
+      return
+    }
+
+    const toolPatch = extractToolPatch(payload)
+    if (!toolPatch) {
+      return
+    }
+
+    if (!toolPatch.result && toolPatch.status !== 'running') {
+      toolPatch.result = asString(payload.text)
+    }
 
     store.markSessionOpened(sessionKey, updatedAt)
-    store.upsertToolInvocation(sessionKey, {
-      id: toolCallId ? `tool:${sessionKey}:${toolCallId}` : `tool:${sessionKey}:${toolName}:${updatedAt}`,
+    if (proxyNodeKind && proxyNodeKind !== 'tool') {
+      return
+    }
+
+    upsertToolPatch(
+      sessionKey,
+      proxyNodeId,
+      proxyNodeOrder,
       runId,
-      toolCallId,
-      toolName,
-      command,
-      arguments: argumentsText,
-      result,
-      status,
-      error,
-      createdAt: asString(payload.createdAt) ?? updatedAt,
-      updatedAt,
-    })
+      asString(payload.createdAt) ?? updatedAt,
+      eventSeq,
+      toolPatch,
+    )
   }
 }

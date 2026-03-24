@@ -9,6 +9,8 @@ const gatewayClient_1 = require("./gatewayClient");
 const logsService_1 = require("./logsService");
 const browserWsHub_1 = require("./browserWsHub");
 const statusService_1 = require("./statusService");
+const ChatStreamCoordinator_1 = require("./streaming/chat/ChatStreamCoordinator");
+const SyncBootstrapCoordinator_1 = require("./streaming/chat/SyncBootstrapCoordinator");
 const defaultPort = 22846;
 const parsePort = (...candidates) => {
     for (const candidate of candidates) {
@@ -23,6 +25,15 @@ const parsePort = (...candidates) => {
     return defaultPort;
 };
 const port = parsePort(process.env.PANEL_PROXY_PORT, process.env.PORT);
+const asSessionKeyList = (value) => {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+    const keys = value
+        .map((entry) => typeof entry === 'string' ? entry.trim() : '')
+        .filter((entry) => entry.length > 0);
+    return [...new Set(keys)].slice(0, 20);
+};
 const ack = (action, id, result) => ({
     id,
     type: 'ack',
@@ -120,6 +131,7 @@ async function main() {
     app.get('/ws', { websocket: true }, (socket, _request) => {
         const ws = socket;
         browserWsHub_1.browserWsHub.addClient(ws);
+        ChatStreamCoordinator_1.chatStreamCoordinator.registerClient(ws);
         try {
             ws.send(JSON.stringify({
                 type: 'event',
@@ -146,6 +158,7 @@ async function main() {
         ws.on('close', () => {
             (0, logsService_1.unsubscribeSubscriber)(ws);
             browserWsHub_1.browserWsHub.removeClient(ws);
+            ChatStreamCoordinator_1.chatStreamCoordinator.unregisterClient(ws);
         });
     });
     await app.listen({ port, host: '0.0.0.0' });
@@ -171,11 +184,18 @@ async function handleEnvelope(ws, envelope) {
                 ws.send(JSON.stringify(ackError('chat.send', envelope.id, 'invalid_params', 'chat.send requires sessionKey and message')));
                 break;
             }
+            const gate = ChatStreamCoordinator_1.chatStreamCoordinator.beforeChatSend(ws, sessionKey, message);
+            if (!gate.ok) {
+                ws.send(JSON.stringify(ackError('chat.send', envelope.id, gate.code, gate.message)));
+                break;
+            }
             try {
                 const result = await (0, gatewayClient_1.sendChatMessage)({ sessionKey, message, idempotencyKey });
+                ChatStreamCoordinator_1.chatStreamCoordinator.afterChatSendAck(sessionKey, typeof result.runId === 'string' ? result.runId : undefined);
                 ws.send(JSON.stringify(ack('chat.send', envelope.id, result)));
             }
             catch (error) {
+                ChatStreamCoordinator_1.chatStreamCoordinator.afterChatSendFailure(sessionKey);
                 ws.send(JSON.stringify(ackError('chat.send', envelope.id, 'gateway_error', error instanceof Error ? error.message : 'Failed to send chat message')));
             }
             break;
@@ -191,8 +211,14 @@ async function handleEnvelope(ws, envelope) {
                 ws.send(JSON.stringify(ackError('chat.abort', envelope.id, 'invalid_params', 'chat.abort requires runId or sessionKey')));
                 break;
             }
+            const gate = ChatStreamCoordinator_1.chatStreamCoordinator.beforeChatAbort(ws, { runId, sessionKey });
+            if (!gate.ok) {
+                ws.send(JSON.stringify(ackError('chat.abort', envelope.id, gate.code, gate.message)));
+                break;
+            }
             try {
                 const result = await (0, gatewayClient_1.abortChatRun)({ runId, sessionKey });
+                ChatStreamCoordinator_1.chatStreamCoordinator.afterChatAbortAck({ runId, sessionKey });
                 ws.send(JSON.stringify(ack('chat.abort', envelope.id, result)));
             }
             catch (error) {
@@ -226,7 +252,46 @@ async function handleEnvelope(ws, envelope) {
                 ws.send(JSON.stringify(ackError('session.open', envelope.id, 'invalid_params', 'session.open requires sessionKey')));
                 break;
             }
-            ws.send(JSON.stringify(ack('session.open', envelope.id, { accepted: true, sessionKey })));
+            const gate = ChatStreamCoordinator_1.chatStreamCoordinator.handleSessionOpen(ws, sessionKey);
+            if (!gate.ok) {
+                ws.send(JSON.stringify(ackError('session.open', envelope.id, gate.code, gate.message)));
+                break;
+            }
+            ws.send(JSON.stringify(ack('session.open', envelope.id, { accepted: true, sessionKey, subscribed: true })));
+            break;
+        }
+        case 'sync.bootstrap': {
+            const payload = envelope.payload ?? {};
+            const directSessionKeys = asSessionKeyList(payload.sessionKeys);
+            const selectedSessionKey = typeof payload.sessionKey === 'string' && payload.sessionKey.trim()
+                ? payload.sessionKey.trim()
+                : '';
+            const includeCatalog = payload.includeCatalog === true;
+            const subscribedSessions = ChatStreamCoordinator_1.chatStreamCoordinator.getSubscribedSessions(ws);
+            const sessionKeys = [...new Set([
+                    ...directSessionKeys,
+                    ...(selectedSessionKey ? [selectedSessionKey] : []),
+                    ...subscribedSessions,
+                ])];
+            try {
+                const [catalog, sessionSnapshots] = await Promise.all([
+                    SyncBootstrapCoordinator_1.syncBootstrapCoordinator.resolveCatalogSnapshot(includeCatalog, async () => {
+                        const [agents, sessions] = await Promise.all([(0, gatewayClient_1.fetchAgents)(), (0, gatewayClient_1.fetchSessions)()]);
+                        return { agents, sessions };
+                    }),
+                    SyncBootstrapCoordinator_1.syncBootstrapCoordinator.resolveSessionSnapshots(sessionKeys, (sessionKey) => ChatStreamCoordinator_1.chatStreamCoordinator.getSessionRuntimeSnapshot(sessionKey), async (sessionKey) => await (0, gatewayClient_1.fetchChatHistory)(sessionKey)),
+                ]);
+                ws.send(JSON.stringify(ack('sync.bootstrap', envelope.id, {
+                    accepted: true,
+                    at: new Date().toISOString(),
+                    agents: catalog?.agents ?? [],
+                    sessions: catalog?.sessions ?? [],
+                    sessionSnapshots,
+                })));
+            }
+            catch (error) {
+                ws.send(JSON.stringify(ackError('sync.bootstrap', envelope.id, 'gateway_error', error instanceof Error ? error.message : 'Failed to bootstrap sync')));
+            }
             break;
         }
         case 'logs.subscribe': {

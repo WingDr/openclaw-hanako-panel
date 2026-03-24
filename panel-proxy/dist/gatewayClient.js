@@ -19,7 +19,7 @@ const node_os_1 = __importDefault(require("node:os"));
 const node_path_1 = __importDefault(require("node:path"));
 const node_tls_1 = __importDefault(require("node:tls"));
 const ws_1 = __importDefault(require("ws"));
-const browserWsHub_1 = require("./browserWsHub");
+const ChatStreamCoordinator_1 = require("./streaming/chat/ChatStreamCoordinator");
 const openClawConfigPath = node_path_1.default.join(node_os_1.default.homedir(), '.openclaw', 'openclaw.json');
 const openClawDeviceIdentityPath = node_path_1.default.join(node_os_1.default.homedir(), '.openclaw', 'identity', 'device.json');
 const panelProxyIdentityPath = node_path_1.default.join(node_os_1.default.homedir(), '.openclaw-hanako-panel', 'device-identity.json');
@@ -1246,7 +1246,7 @@ class GatewayLogsClient {
         return {
             accepted: true,
             sessionKey: asString(record?.sessionKey) ?? params.sessionKey,
-            runId: asString(record?.runId) ?? asString(record?.id),
+            runId: asString(pickFirst(record ?? {}, ['runId', 'responseId', 'chatId'])),
         };
     }
     async chatAbort(params) {
@@ -1411,7 +1411,7 @@ class GatewayLogsClient {
             }
             const browserEvent = normalizeGatewayBrowserEvent(payload);
             if (browserEvent) {
-                browserWsHub_1.browserWsHub.broadcast(browserEvent);
+                ChatStreamCoordinator_1.chatStreamCoordinator.handleGatewayEvent(browserEvent);
             }
             return;
         }
