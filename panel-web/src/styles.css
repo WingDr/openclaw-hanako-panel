@@ -276,6 +276,10 @@ button {
   margin-top: 4px;
 }
 
+.pw-session-group.is-nested {
+  margin-top: 0;
+}
+
 .pw-session-tree-label {
   padding: 0 4px;
   font-size: 0.74rem;
@@ -312,6 +316,10 @@ button {
 
 .pw-session-group-list {
   padding-left: 8px;
+}
+
+.pw-session-group.is-nested > .pw-session-group-list {
+  padding-left: 12px;
 }
 
 .pw-session-button {
