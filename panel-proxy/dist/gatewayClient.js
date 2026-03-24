@@ -229,9 +229,35 @@ const stringifyStructuredValue = (value) => {
 const extractMessageRecord = (payload) => (asRecord(pickFirst(payload, ['message', 'deltaMessage', 'item'])));
 const extractMessageContentParts = (payload) => {
     const messageRecord = extractMessageRecord(payload);
-    return asRecordArray(messageRecord?.content ?? messageRecord?.parts ?? messageRecord?.items);
+    return asRecordArray(messageRecord?.content
+        ?? messageRecord?.parts
+        ?? messageRecord?.items
+        ?? payload.content
+        ?? payload.parts
+        ?? payload.items);
 };
 const findMessageContentPart = (payload, predicate) => extractMessageContentParts(payload).find(predicate);
+const isToolCallContentPart = (part) => {
+    const type = asString(part.type)?.toLowerCase();
+    return type === 'toolcall' || type === 'tool_call' || type === 'functioncall' || type === 'function_call';
+};
+const extractToolCommandFromToolCallPart = (part) => {
+    const directCommand = stringifyToolCommand(pickFirst(part, ['command', 'cmd', 'argv']));
+    if (directCommand) {
+        return directCommand;
+    }
+    const structuredArguments = asRecord(pickFirst(part, ['arguments', 'args', 'params', 'input']));
+    if (!structuredArguments) {
+        return undefined;
+    }
+    if (structuredArguments.command === undefined
+        && structuredArguments.cmd === undefined
+        && structuredArguments.program === undefined
+        && structuredArguments.args === undefined) {
+        return undefined;
+    }
+    return stringifyToolCommand(structuredArguments);
+};
 const stringifyToolCommand = (value) => {
     if (typeof value === 'string') {
         return trimToUndefined(value);
@@ -274,8 +300,7 @@ const extractToolCommand = (payload) => {
         return direct;
     }
     const toolCallPart = findMessageContentPart(payload, (part) => {
-        const type = asString(part.type)?.toLowerCase();
-        return type === 'toolcall' || type === 'tool_call' || type === 'functioncall' || type === 'function_call';
+        return isToolCallContentPart(part);
     });
     return stringifyToolCommand(pickFirst(toolCallPart ?? {}, [
         'command',
@@ -303,17 +328,15 @@ const extractToolArguments = (payload) => {
         return stringifyStructuredValue(directArguments);
     }
     const nestedInvocation = asRecord(pickFirst(payload, ['invocation', 'request']));
-    if (!nestedInvocation) {
-        return undefined;
-    }
-    const { command: _command, cmd: _cmd, program: _program, name: _name, ...rest } = nestedInvocation;
-    const nestedValue = stringifyStructuredValue(rest);
-    if (nestedValue) {
-        return nestedValue;
+    if (nestedInvocation) {
+        const { command: _command, cmd: _cmd, program: _program, name: _name, ...rest } = nestedInvocation;
+        const nestedValue = stringifyStructuredValue(rest);
+        if (nestedValue) {
+            return nestedValue;
+        }
     }
     const toolCallPart = findMessageContentPart(payload, (part) => {
-        const type = asString(part.type)?.toLowerCase();
-        return type === 'toolcall' || type === 'tool_call' || type === 'functioncall' || type === 'function_call';
+        return isToolCallContentPart(part);
     });
     if (!toolCallPart) {
         return undefined;
@@ -380,24 +403,25 @@ function normalizeHistoryRecord(raw, sessionKey, index, fallbackCreatedAt) {
     if (typeof raw === 'string') {
         const text = trimToUndefined(raw);
         if (!text) {
-            return undefined;
+            return [];
         }
-        return {
-            messageId: `${sessionKey}:history:${index + 1}`,
-            sessionKey,
-            kind: 'assistant',
-            text,
-            createdAt: fallbackCreatedAt,
-            status: 'complete',
-            order: index,
-        };
+        return [{
+                messageId: `${sessionKey}:history:${index + 1}`,
+                sessionKey,
+                kind: 'assistant',
+                text,
+                createdAt: fallbackCreatedAt,
+                status: 'complete',
+                order: index,
+            }];
     }
     const record = asRecord(raw);
     if (!record) {
-        return undefined;
+        return [];
     }
     const toolCallId = asString(pickFirst(record, ['toolCallId', 'toolId', 'callId', 'invocationId']));
     const toolName = asString(pickFirst(record, ['toolName', 'tool', 'name', 'commandName']));
+    const toolCallParts = extractMessageContentParts(record).filter((part) => isToolCallContentPart(part));
     const isToolLike = Boolean(toolCallId
         || toolName
         || ['tool', 'function'].includes(asString(pickFirst(record, ['role', 'author', 'type', 'kind']))?.toLowerCase() ?? ''));
@@ -405,6 +429,48 @@ function normalizeHistoryRecord(raw, sessionKey, index, fallbackCreatedAt) {
     const kind = normalizeTranscriptKind(roleValue, isToolLike);
     const createdAt = toIsoTimestamp(pickFirst(record, ['createdAt', 'timestamp', 'ts', 'time', 'at', 'date'])) ?? fallbackCreatedAt;
     const status = normalizeTranscriptStatus(pickFirst(record, ['status', 'state', 'phase']));
+    const baseMessageId = asString(pickFirst(record, ['id', 'messageId', 'entryId', 'key'])) ?? `${sessionKey}:history:${index + 1}`;
+    const items = [];
+    if (kind !== 'tool') {
+        const text = trimToUndefined(collectMessageText(raw).join('\n\n'));
+        if (text) {
+            items.push({
+                messageId: baseMessageId,
+                sessionKey,
+                kind: status === 'error' && kind !== 'user' ? 'error' : kind,
+                text,
+                createdAt,
+                status,
+                order: index,
+            });
+        }
+    }
+    if (toolCallParts.length > 0) {
+        toolCallParts.forEach((part, partIndex) => {
+            const partToolCallId = asString(pickFirst(part, ['id', 'toolCallId', 'toolId', 'callId', 'invocationId']));
+            const partToolName = asString(pickFirst(part, ['name', 'toolName', 'tool', 'commandName', 'functionName']));
+            const partToolInvocation = {
+                toolName: partToolName ?? 'Tool',
+                toolCallId: partToolCallId,
+                command: extractToolCommandFromToolCallPart(part),
+                arguments: stringifyStructuredValue(pickFirst(part, ['arguments', 'args', 'params', 'input', 'partialJson'])),
+                status: normalizeToolInvocationStatus(pickFirst(record, ['status', 'state', 'phase'])),
+            };
+            if (!partToolInvocation.command && !partToolInvocation.arguments && !partToolInvocation.toolCallId) {
+                return;
+            }
+            items.push({
+                messageId: partToolCallId ? `${baseMessageId}:tool:${partToolCallId}` : `${baseMessageId}:tool:${partIndex + 1}`,
+                sessionKey,
+                kind: 'tool',
+                text: undefined,
+                createdAt,
+                status,
+                toolInvocation: partToolInvocation,
+                order: index + (partIndex + 1) / 100,
+            });
+        });
+    }
     if (kind === 'tool') {
         const toolInvocation = {
             toolName: toolName ?? 'Tool',
@@ -416,10 +482,10 @@ function normalizeHistoryRecord(raw, sessionKey, index, fallbackCreatedAt) {
             error: asString(pickFirst(asRecord(record.error) ?? {}, ['message', 'error'])) ?? asString(record.error),
         };
         if (!toolInvocation.command && !toolInvocation.arguments && !toolInvocation.result && !toolInvocation.toolCallId) {
-            return undefined;
+            return items;
         }
-        return {
-            messageId: asString(pickFirst(record, ['id', 'messageId', 'entryId', 'key'])) ?? `${sessionKey}:history:${index + 1}`,
+        items.push({
+            messageId: baseMessageId,
             sessionKey,
             kind,
             text: toolInvocation.result,
@@ -427,21 +493,51 @@ function normalizeHistoryRecord(raw, sessionKey, index, fallbackCreatedAt) {
             status,
             toolInvocation,
             order: index,
+        });
+    }
+    return items;
+}
+function mergeHistoryToolItems(items) {
+    const merged = [];
+    const toolIndexByCallId = new Map();
+    for (const item of items) {
+        const toolCallIdValue = item.kind === 'tool' ? item.toolInvocation?.toolCallId : undefined;
+        if (!toolCallIdValue) {
+            merged.push(item);
+            continue;
+        }
+        const existingIndex = toolIndexByCallId.get(toolCallIdValue);
+        if (existingIndex === undefined) {
+            toolIndexByCallId.set(toolCallIdValue, merged.length);
+            merged.push(item);
+            continue;
+        }
+        const existing = merged[existingIndex];
+        if (!existing.toolInvocation) {
+            merged.push(item);
+            continue;
+        }
+        const mergedToolInvocation = {
+            ...existing.toolInvocation,
+            ...item.toolInvocation,
+            toolName: item.toolInvocation?.toolName ?? existing.toolInvocation.toolName,
+            toolCallId: toolCallIdValue,
+            command: existing.toolInvocation.command ?? item.toolInvocation?.command,
+            arguments: existing.toolInvocation.arguments ?? item.toolInvocation?.arguments,
+            result: existing.toolInvocation.result ?? item.toolInvocation?.result,
+            error: existing.toolInvocation.error ?? item.toolInvocation?.error,
+            status: item.toolInvocation?.result || item.toolInvocation?.error
+                ? item.toolInvocation.status
+                : existing.toolInvocation.status,
+        };
+        merged[existingIndex] = {
+            ...existing,
+            text: mergedToolInvocation.result ?? existing.text ?? item.text,
+            status: item.status ?? existing.status,
+            toolInvocation: mergedToolInvocation,
         };
     }
-    const text = trimToUndefined(collectMessageText(raw).join('\n\n'));
-    if (!text) {
-        return undefined;
-    }
-    return {
-        messageId: asString(pickFirst(record, ['id', 'messageId', 'entryId', 'key'])) ?? `${sessionKey}:history:${index + 1}`,
-        sessionKey,
-        kind: status === 'error' && kind !== 'user' ? 'error' : kind,
-        text,
-        createdAt,
-        status,
-        order: index,
-    };
+    return merged;
 }
 function normalizeChatHistoryPayload(payload, sessionKey) {
     const fallbackCreatedAt = new Date().toISOString();
@@ -466,15 +562,15 @@ function normalizeChatHistoryPayload(payload, sessionKey) {
                 ? [record]
                 : [];
         })();
-    return rawEntries
-        .map((entry, index) => normalizeHistoryRecord(entry, sessionKey, index, fallbackCreatedAt))
-        .filter((entry) => Boolean(entry))
+    const normalizedEntries = rawEntries
+        .flatMap((entry, index) => normalizeHistoryRecord(entry, sessionKey, index, fallbackCreatedAt))
         .sort((left, right) => {
         if (left.createdAt === right.createdAt) {
             return left.order - right.order;
         }
         return left.createdAt < right.createdAt ? -1 : 1;
-    })
+    });
+    return mergeHistoryToolItems(normalizedEntries)
         .map(({ order: _order, ...message }) => message);
 }
 function normalizeAgentRecord(raw, fallbackId) {

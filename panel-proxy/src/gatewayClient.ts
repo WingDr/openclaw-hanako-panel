@@ -361,13 +361,48 @@ const extractMessageRecord = (payload: Record<string, unknown>): Record<string, 
 
 const extractMessageContentParts = (payload: Record<string, unknown>): Record<string, unknown>[] => {
   const messageRecord = extractMessageRecord(payload)
-  return asRecordArray(messageRecord?.content ?? messageRecord?.parts ?? messageRecord?.items)
+  return asRecordArray(
+    messageRecord?.content
+    ?? messageRecord?.parts
+    ?? messageRecord?.items
+    ?? payload.content
+    ?? payload.parts
+    ?? payload.items,
+  )
 }
 
 const findMessageContentPart = (
   payload: Record<string, unknown>,
   predicate: (part: Record<string, unknown>) => boolean,
 ): Record<string, unknown> | undefined => extractMessageContentParts(payload).find(predicate)
+
+const isToolCallContentPart = (part: Record<string, unknown>): boolean => {
+  const type = asString(part.type)?.toLowerCase()
+  return type === 'toolcall' || type === 'tool_call' || type === 'functioncall' || type === 'function_call'
+}
+
+const extractToolCommandFromToolCallPart = (part: Record<string, unknown>): string | undefined => {
+  const directCommand = stringifyToolCommand(pickFirst(part, ['command', 'cmd', 'argv']))
+  if (directCommand) {
+    return directCommand
+  }
+
+  const structuredArguments = asRecord(pickFirst(part, ['arguments', 'args', 'params', 'input']))
+  if (!structuredArguments) {
+    return undefined
+  }
+
+  if (
+    structuredArguments.command === undefined
+    && structuredArguments.cmd === undefined
+    && structuredArguments.program === undefined
+    && structuredArguments.args === undefined
+  ) {
+    return undefined
+  }
+
+  return stringifyToolCommand(structuredArguments)
+}
 
 const stringifyToolCommand = (value: unknown): string | undefined => {
   if (typeof value === 'string') {
@@ -420,8 +455,7 @@ const extractToolCommand = (payload: Record<string, unknown>): string | undefine
   }
 
   const toolCallPart = findMessageContentPart(payload, (part) => {
-    const type = asString(part.type)?.toLowerCase()
-    return type === 'toolcall' || type === 'tool_call' || type === 'functioncall' || type === 'function_call'
+    return isToolCallContentPart(part)
   })
 
   return stringifyToolCommand(
@@ -454,19 +488,16 @@ const extractToolArguments = (payload: Record<string, unknown>): string | undefi
   }
 
   const nestedInvocation = asRecord(pickFirst(payload, ['invocation', 'request']))
-  if (!nestedInvocation) {
-    return undefined
-  }
-
-  const { command: _command, cmd: _cmd, program: _program, name: _name, ...rest } = nestedInvocation
-  const nestedValue = stringifyStructuredValue(rest)
-  if (nestedValue) {
-    return nestedValue
+  if (nestedInvocation) {
+    const { command: _command, cmd: _cmd, program: _program, name: _name, ...rest } = nestedInvocation
+    const nestedValue = stringifyStructuredValue(rest)
+    if (nestedValue) {
+      return nestedValue
+    }
   }
 
   const toolCallPart = findMessageContentPart(payload, (part) => {
-    const type = asString(part.type)?.toLowerCase()
-    return type === 'toolcall' || type === 'tool_call' || type === 'functioncall' || type === 'function_call'
+    return isToolCallContentPart(part)
   })
 
   if (!toolCallPart) {
@@ -551,14 +582,14 @@ function normalizeHistoryRecord(
   sessionKey: string,
   index: number,
   fallbackCreatedAt: string,
-): (ChatHistoryItem & { order: number }) | undefined {
+): Array<ChatHistoryItem & { order: number }> {
   if (typeof raw === 'string') {
     const text = trimToUndefined(raw)
     if (!text) {
-      return undefined
+      return []
     }
 
-    return {
+    return [{
       messageId: `${sessionKey}:history:${index + 1}`,
       sessionKey,
       kind: 'assistant',
@@ -566,16 +597,17 @@ function normalizeHistoryRecord(
       createdAt: fallbackCreatedAt,
       status: 'complete',
       order: index,
-    }
+    }]
   }
 
   const record = asRecord(raw)
   if (!record) {
-    return undefined
+    return []
   }
 
   const toolCallId = asString(pickFirst(record, ['toolCallId', 'toolId', 'callId', 'invocationId']))
   const toolName = asString(pickFirst(record, ['toolName', 'tool', 'name', 'commandName']))
+  const toolCallParts = extractMessageContentParts(record).filter((part) => isToolCallContentPart(part))
   const isToolLike = Boolean(
     toolCallId
     || toolName
@@ -585,6 +617,54 @@ function normalizeHistoryRecord(
   const kind = normalizeTranscriptKind(roleValue, isToolLike)
   const createdAt = toIsoTimestamp(pickFirst(record, ['createdAt', 'timestamp', 'ts', 'time', 'at', 'date'])) ?? fallbackCreatedAt
   const status = normalizeTranscriptStatus(pickFirst(record, ['status', 'state', 'phase']))
+  const baseMessageId = asString(pickFirst(record, ['id', 'messageId', 'entryId', 'key'])) ?? `${sessionKey}:history:${index + 1}`
+  const items: Array<ChatHistoryItem & { order: number }> = []
+
+  if (kind !== 'tool') {
+    const text = trimToUndefined(collectMessageText(raw).join('\n\n'))
+    if (text) {
+      items.push({
+        messageId: baseMessageId,
+        sessionKey,
+        kind: status === 'error' && kind !== 'user' ? 'error' : kind,
+        text,
+        createdAt,
+        status,
+        order: index,
+      })
+    }
+  }
+
+  if (toolCallParts.length > 0) {
+    toolCallParts.forEach((part, partIndex) => {
+      const partToolCallId = asString(pickFirst(part, ['id', 'toolCallId', 'toolId', 'callId', 'invocationId']))
+      const partToolName = asString(pickFirst(part, ['name', 'toolName', 'tool', 'commandName', 'functionName']))
+      const partToolInvocation: ToolInvocation = {
+        toolName: partToolName ?? 'Tool',
+        toolCallId: partToolCallId,
+        command: extractToolCommandFromToolCallPart(part),
+        arguments: stringifyStructuredValue(
+          pickFirst(part, ['arguments', 'args', 'params', 'input', 'partialJson']),
+        ),
+        status: normalizeToolInvocationStatus(pickFirst(record, ['status', 'state', 'phase'])),
+      }
+
+      if (!partToolInvocation.command && !partToolInvocation.arguments && !partToolInvocation.toolCallId) {
+        return
+      }
+
+      items.push({
+        messageId: partToolCallId ? `${baseMessageId}:tool:${partToolCallId}` : `${baseMessageId}:tool:${partIndex + 1}`,
+        sessionKey,
+        kind: 'tool',
+        text: undefined,
+        createdAt,
+        status,
+        toolInvocation: partToolInvocation,
+        order: index + (partIndex + 1) / 100,
+      })
+    })
+  }
 
   if (kind === 'tool') {
     const toolInvocation: ToolInvocation = {
@@ -598,11 +678,11 @@ function normalizeHistoryRecord(
     }
 
     if (!toolInvocation.command && !toolInvocation.arguments && !toolInvocation.result && !toolInvocation.toolCallId) {
-      return undefined
+      return items
     }
 
-    return {
-      messageId: asString(pickFirst(record, ['id', 'messageId', 'entryId', 'key'])) ?? `${sessionKey}:history:${index + 1}`,
+    items.push({
+      messageId: baseMessageId,
       sessionKey,
       kind,
       text: toolInvocation.result,
@@ -610,23 +690,59 @@ function normalizeHistoryRecord(
       status,
       toolInvocation,
       order: index,
+    })
+  }
+
+  return items
+}
+
+function mergeHistoryToolItems(items: Array<ChatHistoryItem & { order: number }>): Array<ChatHistoryItem & { order: number }> {
+  const merged: Array<ChatHistoryItem & { order: number }> = []
+  const toolIndexByCallId = new Map<string, number>()
+
+  for (const item of items) {
+    const toolCallIdValue = item.kind === 'tool' ? item.toolInvocation?.toolCallId : undefined
+    if (!toolCallIdValue) {
+      merged.push(item)
+      continue
+    }
+
+    const existingIndex = toolIndexByCallId.get(toolCallIdValue)
+    if (existingIndex === undefined) {
+      toolIndexByCallId.set(toolCallIdValue, merged.length)
+      merged.push(item)
+      continue
+    }
+
+    const existing = merged[existingIndex]
+    if (!existing.toolInvocation) {
+      merged.push(item)
+      continue
+    }
+
+    const mergedToolInvocation: ToolInvocation = {
+      ...existing.toolInvocation,
+      ...item.toolInvocation,
+      toolName: item.toolInvocation?.toolName ?? existing.toolInvocation.toolName,
+      toolCallId: toolCallIdValue,
+      command: existing.toolInvocation.command ?? item.toolInvocation?.command,
+      arguments: existing.toolInvocation.arguments ?? item.toolInvocation?.arguments,
+      result: existing.toolInvocation.result ?? item.toolInvocation?.result,
+      error: existing.toolInvocation.error ?? item.toolInvocation?.error,
+      status: item.toolInvocation?.result || item.toolInvocation?.error
+        ? item.toolInvocation.status
+        : existing.toolInvocation.status,
+    }
+
+    merged[existingIndex] = {
+      ...existing,
+      text: mergedToolInvocation.result ?? existing.text ?? item.text,
+      status: item.status ?? existing.status,
+      toolInvocation: mergedToolInvocation,
     }
   }
 
-  const text = trimToUndefined(collectMessageText(raw).join('\n\n'))
-  if (!text) {
-    return undefined
-  }
-
-  return {
-    messageId: asString(pickFirst(record, ['id', 'messageId', 'entryId', 'key'])) ?? `${sessionKey}:history:${index + 1}`,
-    sessionKey,
-    kind: status === 'error' && kind !== 'user' ? 'error' : kind,
-    text,
-    createdAt,
-    status,
-    order: index,
-  }
+  return merged
 }
 
 function normalizeChatHistoryPayload(payload: unknown, sessionKey: string): ChatHistoryItem[] {
@@ -657,9 +773,8 @@ function normalizeChatHistoryPayload(payload: unknown, sessionKey: string): Chat
           : []
       })()
 
-  return rawEntries
-    .map((entry, index) => normalizeHistoryRecord(entry, sessionKey, index, fallbackCreatedAt))
-    .filter((entry): entry is ChatHistoryItem & { order: number } => Boolean(entry))
+  const normalizedEntries = rawEntries
+    .flatMap((entry, index) => normalizeHistoryRecord(entry, sessionKey, index, fallbackCreatedAt))
     .sort((left, right) => {
       if (left.createdAt === right.createdAt) {
         return left.order - right.order
@@ -667,6 +782,8 @@ function normalizeChatHistoryPayload(payload: unknown, sessionKey: string): Chat
 
       return left.createdAt < right.createdAt ? -1 : 1
     })
+
+  return mergeHistoryToolItems(normalizedEntries)
     .map(({ order: _order, ...message }) => message)
 }
 

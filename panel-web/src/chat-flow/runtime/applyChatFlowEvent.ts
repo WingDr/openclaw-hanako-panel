@@ -14,6 +14,36 @@ const asString = (value: unknown): string | undefined => (
   typeof value === 'string' && value.trim() ? value.trim() : undefined
 )
 
+const stringifyStructuredValue = (value: unknown): string | undefined => {
+  const directValue = asString(value)
+  if (directValue) {
+    return directValue
+  }
+
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value)
+  }
+
+  if (Array.isArray(value)) {
+    const entries = value
+      .map((entry) => stringifyStructuredValue(entry))
+      .filter((entry): entry is string => Boolean(entry))
+    return entries.length > 0 ? entries.join('\n') : undefined
+  }
+
+  const record = asRecord(value)
+  if (!record) {
+    return undefined
+  }
+
+  try {
+    const serialized = JSON.stringify(record, null, 2)
+    return serialized && serialized !== '{}' ? serialized : undefined
+  } catch {
+    return undefined
+  }
+}
+
 const asFiniteNumber = (value: unknown): number | undefined => {
   if (typeof value === 'number' && Number.isFinite(value)) {
     return value
@@ -154,9 +184,15 @@ const extractToolPatch = (
 ): ToolPatch | undefined => {
   const toolCallId = asString(payload.toolCallId) ?? asString(payload.toolId) ?? asString(payload.callId)
   const toolNameRaw = asString(payload.toolName) ?? asString(payload.tool) ?? asString(payload.name)
-  const command = asString(payload.toolCommand) ?? asString(payload.command) ?? asString(payload.cmd)
-  const argumentsText = asString(payload.toolArguments) ?? asString(payload.arguments) ?? asString(payload.args)
-  const result = asString(payload.toolResult) ?? asString(payload.result) ?? asString(payload.output)
+  const command = stringifyStructuredValue(payload.toolCommand)
+    ?? stringifyStructuredValue(payload.command)
+    ?? stringifyStructuredValue(payload.cmd)
+  const argumentsText = stringifyStructuredValue(payload.toolArguments)
+    ?? stringifyStructuredValue(payload.arguments)
+    ?? stringifyStructuredValue(payload.args)
+  const result = stringifyStructuredValue(payload.toolResult)
+    ?? stringifyStructuredValue(payload.result)
+    ?? stringifyStructuredValue(payload.output)
   const error = asString(payload.errorMessage) ?? asString(asRecord(payload.error)?.message)
   const gatewayEvent = asString(payload.gatewayEvent)?.toLowerCase() ?? ''
   const lifecycle = asString(payload.phase ?? payload.status ?? payload.state ?? payload.event)?.toLowerCase() ?? ''
