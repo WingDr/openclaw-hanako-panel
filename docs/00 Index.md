@@ -1,6 +1,6 @@
 # OpenClaw Panel
 
-更新时间 2026-03-24
+更新时间 2026-03-25
 
 这里是 OpenClaw Panel 的集中档案。  
 用于汇总目前关于 panel 的方向讨论、阶段性文档、架构判断和对话记录，方便后续继续修改、比对和推进。
@@ -14,6 +14,7 @@
 - agent 级独立 session 是核心能力之一
 - 实时日志第一版优先复用 OpenClaw 现有 `logs.tail`
 - 如果要支持局域网 HTTP 访问，推荐加一个薄网关 panel proxy
+- 当前 `panel-proxy` 鉴权采用双轨模型：浏览器走 panel 密码登录 + session cookie，脚本调试走 Bearer API token
 - 前端当前最推荐的组合是 `React + TypeScript + Vite + React Router + Zustand + TanStack Query + TailwindCSS`
 - 如果先做首版，前端和 proxy 都应该明显收缩，只保留分 agent chat、log 监控、agent/channel 状态监控三条主线
 
@@ -61,6 +62,9 @@
 - `14 Proxy Chat 与 Logs 推流同步模块设计 2026-03-24`
 
   - 拆分 proxy 侧 logs/chat 推流与同步模块，并给出“直接透传 vs 增强透传”的可执行决策
+- `15 Proxy 鉴权机制 2026-03-25`
+
+  - 固定当前已实现的浏览器登录、session cookie、Bearer API token 与单独调试方式
 - ​`90 对话记录整理 2026-03-21`
 
   - 本轮 panel 讨论的时间线与关键决策整理
@@ -76,9 +80,10 @@
 5. `12 Chat Session 状态同步与锁设计复盘 2026-03-24`
 6. `13 Chat 流处理模块架构 2026-03-24`
 7. `14 Proxy Chat 与 Logs 推流同步模块设计 2026-03-24`
-8. ​`05 局域网 HTTP 与薄网关方案 2026-03-21`
-9. ​`06 Panel Proxy 设计 2026-03-21`
-10. ​`07 前端网页实现方案与参考实现 2026-03-22`
+8. `15 Proxy 鉴权机制 2026-03-25`
+9. ​`05 局域网 HTTP 与薄网关方案 2026-03-21`
+10. ​`06 Panel Proxy 设计 2026-03-21`
+11. ​`07 前端网页实现方案与参考实现 2026-03-22`
 
 如果要追溯思路变化，再回看：
 
@@ -95,6 +100,7 @@
 - Chat session 状态同步与锁设计复盘
 - Chat 流处理模块架构（含 Mermaid 状态机与架构图）
 - Proxy chat/logs 推流同步模块设计（含透传策略决策）
+- Proxy 鉴权机制（含 panel 密码登录与 Bearer API token 双轨模型）
 
 ## 后续最适合继续补的内容
 

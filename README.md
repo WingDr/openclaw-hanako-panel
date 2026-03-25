@@ -236,9 +236,10 @@
 3. `docs/09 首版前端页面树与组件结构 2026-03-22.md`
 4. `docs/10 Gateway WS 客户端数据流草案 2026-03-22.md`
 5. `docs/11 Panel Proxy 最小接口协议 v0.1 2026-03-22.md`
-6. `docs/05 局域网 HTTP 与薄网关方案 2026-03-21.md`
-7. `docs/06 Panel Proxy 设计 2026-03-21.md`
-8. `docs/07 前端网页实现方案与参考实现 2026-03-22.md`
+6. `docs/15 Proxy 鉴权机制 2026-03-25.md`
+7. `docs/05 局域网 HTTP 与薄网关方案 2026-03-21.md`
+8. `docs/06 Panel Proxy 设计 2026-03-21.md`
+9. `docs/07 前端网页实现方案与参考实现 2026-03-22.md`
 
 如果要追溯完整决策过程，再看：
 
@@ -252,8 +253,13 @@
 - `docs/09 首版前端页面树与组件结构 2026-03-22.md`
 - `docs/10 Gateway WS 客户端数据流草案 2026-03-22.md`
 - `docs/11 Panel Proxy 最小接口协议 v0.1 2026-03-22.md`
+- `docs/15 Proxy 鉴权机制 2026-03-25.md`
 
-这三份文档已经把首版前端骨架、Gateway 实时数据流和 panel proxy 最小协议整理成了可以直接进入编码阶段的草案。
+这四份文档已经把首版前端骨架、Gateway 实时数据流、panel proxy 最小协议和当前鉴权模型整理成了可以直接进入编码阶段的草案。
+
+如果你现在主要关心浏览器登录、session cookie、Bearer API token 和单独调试方式，建议直接读：
+
+- `docs/15 Proxy 鉴权机制 2026-03-25.md`
 
 ## 本地启动
 
@@ -299,6 +305,34 @@ OPENCLAW_LOGS_POLL_MS=1000
 OPENCLAW_LOGS_LIMIT=200
 OPENCLAW_LOGS_MAX_BYTES=250000
 ```
+
+## Proxy 鉴权机制
+
+当前仓库已经实现 `panel-web <-> panel-proxy` 的双轨鉴权：
+
+- 浏览器里的 panel 登录：用户输入 panel 密码，`panel-proxy` 校验 `PANEL_LOGIN_PASSWORD_HASH`，成功后签发短期 `HttpOnly` session cookie
+- 脚本 / `curl` / 集成测试：直接携带 `Authorization: Bearer <PANEL_PROXY_API_TOKEN>`
+
+这套设计的原因是：
+
+- `panel-web` 目前是纯静态前端，不适合内嵌长期 machine secret
+- 浏览器更适合走“密码登录 -> session cookie”
+- 脚本和单独调试则更适合走独立 Bearer token
+
+因此，除了下面三个接口外：
+
+- `GET /api/auth/me`
+- `POST /api/auth/login`
+- `POST /api/auth/logout`
+
+其余所有业务 HTTP API 和 `/ws` 都必须带着下面两类凭证之一：
+
+- 有效 session cookie
+- 有效 Bearer API token
+
+更完整的背景、接口规则和调试方式见：
+
+- `docs/15 Proxy 鉴权机制 2026-03-25.md`
 
 如果你是从另一台设备通过局域网地址访问，例如 `http://192.168.1.20:5173`，推荐先保持 `VITE_PANEL_API_BASE_URL` 和 `VITE_PANEL_WS_URL` 为空，让前端自动连到 `192.168.1.20:22846`。
 
