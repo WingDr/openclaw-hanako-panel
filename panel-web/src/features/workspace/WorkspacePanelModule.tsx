@@ -60,12 +60,21 @@ function buildWorkspaceInjectionMessage(path: string, content: string): string {
   return `File: ${path}\n\n${content}`
 }
 
+function getWorkspaceName(rootPath: string): string {
+  const normalizedPath = rootPath.trim().replace(/[\\/]+$/, '')
+  if (!normalizedPath) {
+    return 'Workspace'
+  }
+
+  const segments = normalizedPath.split(/[\\/]/).filter(Boolean)
+  return segments[segments.length - 1] || normalizedPath
+}
+
 export function WorkspacePanelModule(props: WorkspacePanelModuleProps) {
   const { agentId, sessionKey } = props
   const setSessionHistory = useChatStore((state) => state.setSessionHistory)
   const [treeNodes, setTreeNodes] = useState<WorkspaceTreeNode[]>([])
   const [rootPath, setRootPath] = useState('')
-  const [truncated, setTruncated] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [query, setQuery] = useState('')
@@ -87,7 +96,6 @@ export function WorkspacePanelModule(props: WorkspacePanelModuleProps) {
 
         setTreeNodes(snapshot.nodes)
         setRootPath(snapshot.rootPath)
-        setTruncated(snapshot.truncated)
         setSelectedPath((current) => current || snapshot.nodes[0]?.id || '')
         setExpandedItems(['root', ...snapshot.nodes.filter((node) => node.kind === 'directory').slice(0, 4).map((node) => node.id)])
         setError(null)
@@ -110,6 +118,7 @@ export function WorkspacePanelModule(props: WorkspacePanelModuleProps) {
 
   const flatNodes = useMemo(() => flattenTree(treeNodes), [treeNodes])
   const treeItems = useMemo(() => buildTreeItems(treeNodes), [treeNodes])
+  const workspaceName = useMemo(() => getWorkspaceName(rootPath), [rootPath])
   const selectedNode = flatNodes.find((node) => node.id === selectedPath)
   const searchResults = useMemo(() => {
     if (!query.trim()) {
@@ -182,8 +191,7 @@ export function WorkspacePanelModule(props: WorkspacePanelModuleProps) {
       <header className="pw-right-rail-panel-header">
         <div>
           <p className="pw-section-kicker">Workspace</p>
-          <h2>Agent files</h2>
-          <p className="pw-muted-copy">{rootPath || 'Resolving workspace root...'}</p>
+          <h2>{workspaceName}</h2>
         </div>
         <button className="pw-secondary-button" type="button" onClick={() => setRefreshToken((value) => value + 1)}>
           Refresh
@@ -200,7 +208,6 @@ export function WorkspacePanelModule(props: WorkspacePanelModuleProps) {
       </div>
 
       {error && <div className="pw-inline-note">{error}</div>}
-      {truncated && <div className="pw-inline-note">Workspace tree was truncated to keep the rail responsive.</div>}
 
       <div className="pw-right-rail-body">
         {loading && <div className="pw-empty-state small">Loading workspace...</div>}
@@ -249,12 +256,7 @@ export function WorkspacePanelModule(props: WorkspacePanelModuleProps) {
         )}
       </div>
 
-      <footer className="pw-right-rail-footer">
-        <div className="pw-muted-copy">
-          {selectedNode
-            ? `${selectedNode.kind === 'directory' ? 'Folder' : 'File'} · ${selectedNode.path}`
-            : 'Select a file to open or add to chat.'}
-        </div>
+      <footer className="pw-right-rail-footer is-actions-only">
         <div className="pw-right-rail-actions">
           <button
             className="pw-secondary-button"

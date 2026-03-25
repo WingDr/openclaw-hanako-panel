@@ -267,7 +267,11 @@ button {
 
 .pw-main-surface,
 .pw-message-stream,
-.pw-log-stream {
+.pw-log-stream,
+.pw-right-rail-body,
+.pw-tree-shell,
+.pw-editor-shell .cm-scroller,
+.pw-json-editor-shell .cm-scroller {
   scrollbar-gutter: stable;
   scrollbar-width: thin;
   scrollbar-color: rgba(167, 108, 67, 0.42) rgba(255, 255, 255, 0.18);
@@ -275,21 +279,33 @@ button {
 
 .pw-main-surface::-webkit-scrollbar,
 .pw-message-stream::-webkit-scrollbar,
-.pw-log-stream::-webkit-scrollbar {
+.pw-log-stream::-webkit-scrollbar,
+.pw-right-rail-body::-webkit-scrollbar,
+.pw-tree-shell::-webkit-scrollbar,
+.pw-editor-shell .cm-scroller::-webkit-scrollbar,
+.pw-json-editor-shell .cm-scroller::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
 
 .pw-main-surface::-webkit-scrollbar-track,
 .pw-message-stream::-webkit-scrollbar-track,
-.pw-log-stream::-webkit-scrollbar-track {
+.pw-log-stream::-webkit-scrollbar-track,
+.pw-right-rail-body::-webkit-scrollbar-track,
+.pw-tree-shell::-webkit-scrollbar-track,
+.pw-editor-shell .cm-scroller::-webkit-scrollbar-track,
+.pw-json-editor-shell .cm-scroller::-webkit-scrollbar-track {
   background: rgba(255, 255, 255, 0.18);
   border-radius: 999px;
 }
 
 .pw-main-surface::-webkit-scrollbar-thumb,
 .pw-message-stream::-webkit-scrollbar-thumb,
-.pw-log-stream::-webkit-scrollbar-thumb {
+.pw-log-stream::-webkit-scrollbar-thumb,
+.pw-right-rail-body::-webkit-scrollbar-thumb,
+.pw-tree-shell::-webkit-scrollbar-thumb,
+.pw-editor-shell .cm-scroller::-webkit-scrollbar-thumb,
+.pw-json-editor-shell .cm-scroller::-webkit-scrollbar-thumb {
   border: 2px solid transparent;
   border-radius: 999px;
   background: rgba(167, 108, 67, 0.42);
@@ -298,7 +314,11 @@ button {
 
 .pw-main-surface::-webkit-scrollbar-thumb:hover,
 .pw-message-stream::-webkit-scrollbar-thumb:hover,
-.pw-log-stream::-webkit-scrollbar-thumb:hover {
+.pw-log-stream::-webkit-scrollbar-thumb:hover,
+.pw-right-rail-body::-webkit-scrollbar-thumb:hover,
+.pw-tree-shell::-webkit-scrollbar-thumb:hover,
+.pw-editor-shell .cm-scroller::-webkit-scrollbar-thumb:hover,
+.pw-json-editor-shell .cm-scroller::-webkit-scrollbar-thumb:hover {
   background: rgba(127, 79, 45, 0.56);
   background-clip: padding-box;
 }
@@ -686,6 +706,10 @@ button {
   justify-content: space-between;
 }
 
+.pw-right-rail-footer.is-actions-only {
+  justify-content: flex-end;
+}
+
 .pw-right-rail-body {
   min-height: 0;
   overflow: auto;
@@ -856,9 +880,19 @@ button {
   border: 1px solid var(--line);
 }
 
+.pw-editor-shell {
+  height: min(58vh, 720px);
+}
+
 .pw-editor-shell .cm-editor,
 .pw-json-editor-shell .cm-editor {
   height: 100%;
+}
+
+.pw-editor-shell .cm-scroller,
+.pw-json-editor-shell .cm-scroller {
+  height: 100%;
+  overflow: auto !important;
 }
 
 .pw-modal-actions {

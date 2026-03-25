@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import CodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror'
 import type { Extension } from '@codemirror/state'
+import { EditorView } from '@codemirror/view'
 import { WorkspaceFileDocument } from '../../api/client'
 
 type WorkspaceEditorDialogProps = {
@@ -14,6 +15,14 @@ type WorkspaceEditorDialogProps = {
 }
 
 const emptyExtensions: Extension[] = []
+const workspaceEditorLayout = EditorView.theme({
+  '&': {
+    height: '100%',
+  },
+  '.cm-scroller': {
+    overflow: 'auto',
+  },
+})
 
 async function loadExtensionsForPath(filePath: string): Promise<Extension[]> {
   const lowerPath = filePath.toLowerCase()
@@ -133,6 +142,10 @@ export function WorkspaceEditorDialog(props: WorkspaceEditorDialogProps) {
     () => selectionText.trim() || value,
     [selectionText, value],
   )
+  const editorExtensions = useMemo(
+    () => [workspaceEditorLayout, ...extensions],
+    [extensions],
+  )
 
   async function handleSave() {
     if (!document) {
@@ -193,7 +206,7 @@ export function WorkspaceEditorDialog(props: WorkspaceEditorDialogProps) {
             data-testid="workspace-editor"
             ref={editorRef}
             value={value}
-            height="58vh"
+            height="100%"
             basicSetup={{
               autocompletion: true,
               bracketMatching: true,
@@ -202,7 +215,7 @@ export function WorkspaceEditorDialog(props: WorkspaceEditorDialogProps) {
               lineNumbers: true,
               foldGutter: true,
             }}
-            extensions={extensions}
+            extensions={editorExtensions}
             onCreateEditor={(view) => {
               if (typeof window !== 'undefined') {
                 ;(window as Window & { __HANAKO_TEST_EDITORS__?: Record<string, unknown> }).__HANAKO_TEST_EDITORS__ = {

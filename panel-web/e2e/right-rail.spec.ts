@@ -41,7 +41,7 @@ test('workspace editor and cron dialogs work end-to-end', async ({ page }) => {
   await page.goto('/chat')
 
   await expect(page.getByText('Hanako Workspace')).toBeVisible()
-  await expect(page.getByText('Agent files')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'workspace-mon3tr' })).toBeVisible()
   await expect(page.getByText('Scheduled runs')).toBeVisible()
 
   const readmeNode = page.locator('.rct-tree-item-button', { hasText: 'README.md' }).first()
@@ -52,7 +52,7 @@ test('workspace editor and cron dialogs work end-to-end', async ({ page }) => {
   await replaceCodeMirrorContent('workspace', '# Mon3tr Workspace\n\nEdited from browser test.\n')
   await page.getByRole('button', { name: 'Save file' }).click()
   await expect(page.getByRole('button', { name: 'Save file' })).toBeEnabled()
-  await page.getByRole('button', { name: 'Close' }).click()
+  await page.getByTestId('workspace-editor-dialog').getByRole('button', { name: 'Close' }).click()
 
   await readmeNode.click()
   await page.getByTestId('workspace-open-file').click()

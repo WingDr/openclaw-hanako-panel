@@ -58,7 +58,6 @@ export function CronPanelModule(props: CronPanelModuleProps) {
         <div>
           <p className="pw-section-kicker">Cron</p>
           <h2>Scheduled runs</h2>
-          <p className="pw-muted-copy">Showing jobs for {agentId || 'current agent'}.</p>
         </div>
         <div className="pw-right-rail-actions">
           <button className="pw-secondary-button" type="button" onClick={() => void refreshJobs()}>
@@ -155,13 +154,6 @@ export function CronPanelModule(props: CronPanelModuleProps) {
           </div>
         )}
       </div>
-
-      <footer className="pw-right-rail-footer">
-        <div className="pw-muted-copy">
-          Structured mode is optimized for `main` and `isolated`. JSON mode stays available for advanced OpenClaw targets.
-        </div>
-      </footer>
-
       <CronConfigDialog
         open={dialogOpen}
         agentId={agentId}

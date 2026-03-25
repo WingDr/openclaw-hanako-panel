@@ -12,7 +12,7 @@ test('chat side panels can collapse, expand, and resize', async ({ page }) => {
   }
 
   await expect(page.getByText('Hanako Workspace')).toBeVisible()
-  await expect(page.getByText('Agent files')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'workspace-mon3tr' })).toBeVisible()
 
   const leftWidthBeforeResize = await readPanelWidth('.pw-panel-frame-left')
   const leftResizeHandle = page.getByRole('button', { name: 'Resize left panel' })
@@ -56,5 +56,5 @@ test('chat side panels can collapse, expand, and resize', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Open right panel' })).toBeVisible()
 
   await page.getByRole('button', { name: 'Open right panel' }).click()
-  await expect(page.getByText('Agent files')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'workspace-mon3tr' })).toBeVisible()
 })
