@@ -1,6 +1,35 @@
-node_modules
+# Dependencies
+node_modules/
+
+# Environment files
 .env
+.env.local
+.env.*.local
+
+# Lockfiles
 package-lock.json
-dist
-build
-.env
+
+# Build outputs
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# Test artifacts
+playwright-report/
+test-results/
+
+# Tool caches
+.vite/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
