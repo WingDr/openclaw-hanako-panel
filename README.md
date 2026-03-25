@@ -282,6 +282,12 @@ cp .env.example .env
 ```dotenv
 PANEL_WEB_PORT=5173
 PANEL_PROXY_PORT=22846
+# panel-web 的人类登录密码哈希，可在仓库根目录执行 `npm run password:hash` 交互式生成并写入 `.env`
+PANEL_LOGIN_PASSWORD_HASH=
+# curl / 脚本 / 集成测试直连 panel-proxy 时使用的 Bearer token
+PANEL_PROXY_API_TOKEN=
+# 浏览器登录成功后换到 HttpOnly session cookie，默认 12 小时
+PANEL_SESSION_TTL_MS=43200000
 # 留空时，panel-web 会默认连接到“当前页面主机名 + PANEL_PROXY_PORT”
 VITE_PANEL_API_BASE_URL=
 VITE_PANEL_WS_URL=
@@ -297,6 +303,10 @@ OPENCLAW_LOGS_MAX_BYTES=250000
 如果你是从另一台设备通过局域网地址访问，例如 `http://192.168.1.20:5173`，推荐先保持 `VITE_PANEL_API_BASE_URL` 和 `VITE_PANEL_WS_URL` 为空，让前端自动连到 `192.168.1.20:22846`。
 
 只有当 `panel-web` 和 `panel-proxy` 不在同一台机器上时，才需要显式填写这两个变量。
+
+如果启用了 `PANEL_LOGIN_PASSWORD_HASH`，第一次打开页面会先要求输入 panel 密码。输入成功后，proxy 会下发一个短期 `HttpOnly` cookie，后续 HTTP API 和 `/ws` 都共用这次浏览器会话。
+
+如果启用了 `PANEL_PROXY_API_TOKEN`，你可以直接用 `Bearer` token 单独测试 `panel-proxy` API，而不需要先走浏览器登录。
 
 `/manage` 里的 `Logs` 子页数据来源是 OpenClaw Gateway 的 `logs.tail`，不是 `panel-proxy` 自己的控制台输出。
 如果 `OPENCLAW_GATEWAY_*` 没有显式填写，`panel-proxy` 会优先尝试从同机的 `~/.openclaw/openclaw.json` 推导本地 Gateway 地址和 token。
@@ -328,6 +338,40 @@ npm run dev
 - 默认值：`22846`
 - 示例：`PANEL_PROXY_PORT=3001`
 - 兼容性：如果没有设置这个变量，`panel-proxy` 仍会兼容旧的 `PORT`
+
+### `PANEL_LOGIN_PASSWORD_HASH`
+
+- 用途：为 `panel-web` 的人类登录提供密码校验
+- 默认值：留空，即不启用浏览器登录密码
+- 生成方式：优先在仓库根目录执行 `npm run password:hash`，按提示输入两次密码，脚本会自动更新根目录 `.env`
+- 兼容方式：也可执行 `npm run password:hash -- "你的密码"`，同样会自动更新根目录 `.env`
+- 只打印不写入：`npm run password:hash -- --print-only "你的密码"`
+- 格式：`scrypt$N$r$p$salt$hash`
+
+如果你想确认当前 `.env` 里的密码哈希是否和某个密码一致，可以在仓库根目录执行：
+
+```bash
+npm run password:verify
+```
+
+或：
+
+```bash
+npm run password:verify -- "你的密码"
+```
+
+### `PANEL_PROXY_API_TOKEN`
+
+- 用途：为 `curl`、脚本和集成测试直连 `panel-proxy` 提供 Bearer token 鉴权
+- 默认值：留空，即不启用这条机器调用通道
+- 推荐值：至少 24 位的随机字符串
+- 请求方式：`Authorization: Bearer <token>`
+
+### `PANEL_SESSION_TTL_MS`
+
+- 用途：控制 panel 登录 session cookie 的有效期
+- 默认值：`43200000`（12 小时）
+- 示例：`PANEL_SESSION_TTL_MS=28800000`
 
 ### `VITE_PANEL_API_BASE_URL`
 
@@ -372,6 +416,45 @@ npm run dev
 - 用途：每轮 `logs.tail` 请求的最大字节数
 - 默认值：`250000`
 - 示例：`OPENCLAW_LOGS_MAX_BYTES=500000`
+
+## 安全说明
+
+- `PANEL_LOGIN_PASSWORD_HASH` 和 `PANEL_PROXY_API_TOKEN` 解决的是“谁能访问 proxy”的问题，不是链路保密问题。
+- 如果你通过纯 `http://` / `ws://` 暴露在局域网里，token 和 session cookie 仍然可能被旁路监听截获。
+- 真正更稳的做法仍然是：把 `panel-web` 和 `panel-proxy` 放到同一主机名下，并通过 HTTPS/WSS 或反向代理统一暴露。
+- 如果必须跨机器访问，这一版建议直接依赖强 token 鉴权，并尽量放在可信局域网或 VPN 内。
+
+## 单独测试 proxy API
+
+先准备一个 Bearer token：
+
+```dotenv
+PANEL_PROXY_API_TOKEN=your-long-random-token
+```
+
+HTTP 示例：
+
+```bash
+curl -H "Authorization: Bearer $PANEL_PROXY_API_TOKEN" \
+  http://127.0.0.1:22846/api/bootstrap
+```
+
+先登录再带 cookie 的示例：
+
+```bash
+curl -c /tmp/panel.cookie \
+  -H "Content-Type: application/json" \
+  -d '{"password":"你的 panel 密码"}' \
+  http://127.0.0.1:22846/api/auth/login
+
+curl -b /tmp/panel.cookie \
+  http://127.0.0.1:22846/api/bootstrap
+```
+
+WebSocket 单测：
+
+- 使用支持自定义握手 Header 的工具
+- 握手时带 `Authorization: Bearer <PANEL_PROXY_API_TOKEN>`
 
 ## 单独启动子项目
 

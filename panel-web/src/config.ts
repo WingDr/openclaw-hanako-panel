@@ -17,13 +17,17 @@ const defaultWsUrl = import.meta.env.DEV
   : `${runtimeWsProtocol}//${runtimeHostname}:${defaultProxyPort}/ws`
 
 const rewriteLocalhostTarget = (value: string): string => {
-  if (!runtimeLocation || localHostnames.has(runtimeHostname)) {
+  if (!runtimeLocation) {
     return value
   }
 
   try {
     const parsed = new URL(value)
     if (!localHostnames.has(parsed.hostname)) {
+      return value
+    }
+
+    if (parsed.hostname === runtimeHostname) {
       return value
     }
 

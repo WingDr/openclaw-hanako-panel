@@ -1,4 +1,5 @@
 import { panelWsUrl } from '../config'
+import { notifyAuthRequired } from '../auth/events'
 
 type BrowserCommand = {
   id?: string
@@ -115,9 +116,12 @@ export class RealtimeClient {
         settle(() => reject(new Error('Failed to connect to panel-proxy WebSocket')))
       })
 
-      ws.addEventListener('close', () => {
+      ws.addEventListener('close', (event) => {
         if (this.ws === ws) {
           this.ws = undefined
+        }
+        if (event.code === 1008) {
+          notifyAuthRequired()
         }
         this.rejectPending(new Error('WebSocket connection closed'))
         this.emitEvent({
@@ -172,6 +176,9 @@ export class RealtimeClient {
     })
 
     if (!response.ok) {
+      if (response.error?.code === 'unauthorized') {
+        notifyAuthRequired()
+      }
       throw new Error(response.error?.message || `${cmd} failed`)
     }
 
@@ -222,6 +229,20 @@ export class RealtimeClient {
   private emitEvent(event: EventEnvelope) {
     for (const handler of this.handlers) {
       handler(event)
+    }
+  }
+
+  disconnect() {
+    if (!this.ws) {
+      return
+    }
+
+    const ws = this.ws
+    this.ws = undefined
+    this.rejectPending(new Error('WebSocket connection closed'))
+    try {
+      ws.close()
+    } catch {
     }
   }
 }

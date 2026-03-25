@@ -6,8 +6,10 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "dev": "node --watch --env-file=../.env --import tsx src/index.ts",
-    "start": "node --env-file=../.env dist/index.js",
+    "dev": "env -u PANEL_LOGIN_PASSWORD_HASH -u PANEL_PROXY_API_TOKEN -u PANEL_SESSION_TTL_MS node --watch --env-file=../.env --import tsx src/index.ts",
+    "password:hash": "node --import tsx src/generatePasswordHash.ts",
+    "password:verify": "env -u PANEL_LOGIN_PASSWORD_HASH -u PANEL_PROXY_API_TOKEN -u PANEL_SESSION_TTL_MS node --env-file=../.env --import tsx src/verifyPasswordHash.ts",
+    "start": "env -u PANEL_LOGIN_PASSWORD_HASH -u PANEL_PROXY_API_TOKEN -u PANEL_SESSION_TTL_MS node --env-file=../.env dist/index.js",
     "test": "echo 'no tests yet'"
   },
   "license": "MIT",

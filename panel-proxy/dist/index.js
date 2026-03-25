@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const fastify_1 = __importDefault(require("fastify"));
 const websocket_1 = __importDefault(require("@fastify/websocket"));
+const auth_1 = require("./auth");
 const gatewayClient_1 = require("./gatewayClient");
 const logsService_1 = require("./logsService");
 const browserWsHub_1 = require("./browserWsHub");
@@ -67,15 +68,68 @@ async function main() {
     const app = (0, fastify_1.default)({ logger: false });
     await app.register(websocket_1.default);
     app.addHook('onRequest', async (request, reply) => {
-        const origin = typeof request.headers.origin === 'string' ? request.headers.origin : '*';
-        reply.header('Access-Control-Allow-Origin', origin);
-        reply.header('Vary', 'Origin');
-        reply.header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-        reply.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+        (0, auth_1.applyCorsHeaders)(request, reply);
         if (request.method === 'OPTIONS') {
             reply.code(204);
             return reply.send();
         }
+        const pathname = request.raw.url?.split('?')[0] || '';
+        if ((0, auth_1.isPublicPath)(pathname)) {
+            return;
+        }
+        if (!(0, auth_1.resolveRequestAuth)(request).ok) {
+            (0, auth_1.sendUnauthorized)(reply);
+            return reply;
+        }
+    });
+    app.get('/api/auth/me', async (request) => {
+        const response = {
+            ok: true,
+            data: (0, auth_1.createAuthStatusPayload)(request),
+        };
+        return response;
+    });
+    app.post('/api/auth/login', async (request, reply) => {
+        if (!auth_1.authConfig.loginEnabled) {
+            if (!auth_1.authConfig.enabled) {
+                const response = {
+                    ok: true,
+                    data: (0, auth_1.createAuthStatusPayload)(request),
+                };
+                return response;
+            }
+            (0, auth_1.sendLoginUnavailable)(reply);
+            return reply;
+        }
+        const password = typeof request.body?.password === 'string' ? request.body.password : undefined;
+        if (!(0, auth_1.verifyPanelPassword)(password)) {
+            (0, auth_1.sendUnauthorized)(reply, 'Invalid panel password');
+            return reply;
+        }
+        const response = {
+            ok: true,
+            data: (0, auth_1.createSessionCookie)(reply, request),
+        };
+        return response;
+    });
+    app.post('/api/auth/logout', async (request, reply) => {
+        if (!auth_1.authConfig.enabled) {
+            const response = {
+                ok: true,
+                data: (0, auth_1.createAuthStatusPayload)(request),
+            };
+            return response;
+        }
+        (0, auth_1.clearSessionCookie)(reply, request);
+        const response = {
+            ok: true,
+            data: {
+                ...(0, auth_1.createAuthStatusPayload)(request),
+                authenticated: false,
+                expiresAt: undefined,
+            },
+        };
+        return response;
     });
     app.get('/api/bootstrap', async () => {
         const data = await (0, gatewayClient_1.bootstrap)();
@@ -128,7 +182,11 @@ async function main() {
         const response = { ok: true, data };
         return response;
     });
-    app.get('/ws', { websocket: true }, (socket, _request) => {
+    app.get('/ws', { websocket: true }, (socket, request) => {
+        if (!(0, auth_1.resolveRequestAuth)(request).ok) {
+            void socket.close(1008, 'unauthorized');
+            return;
+        }
         const ws = socket;
         browserWsHub_1.browserWsHub.addClient(ws);
         ChatStreamCoordinator_1.chatStreamCoordinator.registerClient(ws);

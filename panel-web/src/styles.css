@@ -1545,11 +1545,120 @@ button {
     justify-content: space-between;
   }
 
-  .pw-tool-summary-name {
+.pw-tool-summary-name {
     max-width: none;
   }
 
   .pw-log-card {
     height: min(62vh, 560px);
+  }
+}
+
+.pw-auth-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  background:
+    radial-gradient(circle at top left, rgba(255, 255, 255, 0.74), transparent 34%),
+    radial-gradient(circle at bottom right, rgba(199, 155, 113, 0.16), transparent 30%),
+    linear-gradient(180deg, #f6f0e8 0%, #eee4d7 100%);
+}
+
+.pw-auth-card {
+  width: min(100%, 540px);
+  display: grid;
+  gap: 20px;
+  padding: 34px 34px 30px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background:
+    linear-gradient(180deg, rgba(255, 250, 243, 0.98), rgba(245, 235, 223, 0.92));
+  box-shadow: var(--shadow);
+}
+
+.pw-auth-header {
+  display: grid;
+  gap: 8px;
+}
+
+.pw-auth-card h1 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 2rem;
+  line-height: 1.08;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.pw-auth-copy {
+  margin: 0;
+  max-width: 44ch;
+  color: var(--muted);
+  line-height: 1.6;
+  font-size: 0.98rem;
+}
+
+.pw-auth-field {
+  display: grid;
+  gap: 10px;
+  color: var(--text);
+  font-size: 0.95rem;
+  font-weight: 500;
+}
+
+.pw-auth-input {
+  width: 100%;
+  min-height: 52px;
+  padding: 14px 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.62);
+  color: var(--text);
+  font: inherit;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55);
+  transition: border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
+}
+
+.pw-auth-input::placeholder {
+  color: color-mix(in srgb, var(--muted) 72%, white 28%);
+}
+
+.pw-auth-input:focus {
+  outline: none;
+  border-color: rgba(167, 108, 67, 0.46);
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.76),
+    0 0 0 4px rgba(167, 108, 67, 0.12);
+}
+
+.pw-auth-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.pw-auth-actions .pw-primary-button {
+  min-width: 148px;
+}
+
+@media (max-width: 640px) {
+  .pw-auth-screen {
+    padding: 18px;
+  }
+
+  .pw-auth-card {
+    padding: 26px 22px 22px;
+    border-radius: 24px;
+  }
+
+  .pw-auth-card h1 {
+    font-size: 1.7rem;
+  }
+
+  .pw-auth-actions .pw-primary-button {
+    width: 100%;
   }
 }

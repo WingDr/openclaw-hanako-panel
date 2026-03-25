@@ -2,11 +2,13 @@
   "name": "openclaw-hanako-panel",
   "private": true,
   "scripts": {
-    "dev": "dotenv -e .env -- concurrently -k -n web,proxy -c cyan,green \"npm run dev:web\" \"npm run dev:proxy\"",
+    "dev": "concurrently -k -n web,proxy -c cyan,green \"npm run dev:web\" \"npm run dev:proxy\"",
     "dev:web": "npm --prefix panel-web run dev",
     "dev:proxy": "npm --prefix panel-proxy run dev",
+    "password:hash": "npm --prefix panel-proxy run password:hash --",
+    "password:verify": "npm --prefix panel-proxy run password:verify --",
     "build": "npm run build:proxy && npm run build:web",
-    "build:web": "dotenv -e .env -- npm --prefix panel-web run build",
+    "build:web": "npm --prefix panel-web run build",
     "build:proxy": "npm --prefix panel-proxy run build"
   },
   "devDependencies": {

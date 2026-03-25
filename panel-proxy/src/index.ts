@@ -1,6 +1,7 @@
 import Fastify from 'fastify'
 import fastifyWebsocket from '@fastify/websocket'
 import type WebSocket from 'ws'
+import { applyCorsHeaders, authConfig, clearSessionCookie, createAuthStatusPayload, createSessionCookie, isPublicPath, resolveRequestAuth, sendLoginUnavailable, sendUnauthorized, verifyPanelPassword } from './auth'
 import { abortChatRun, bootstrap, createPanelSession, fetchAgents, fetchAgentSessions, fetchChatHistory, fetchSessions, sendChatMessage } from './gatewayClient'
 import { getLogsSnapshot, getLogsStatus, getGatewayConnectionSnapshot, subscribeSubscriber, unsubscribeSubscriber } from './logsService'
 import { browserWsHub } from './browserWsHub'
@@ -84,16 +85,77 @@ async function main() {
   await app.register(fastifyWebsocket)
 
   app.addHook('onRequest', async (request, reply) => {
-    const origin = typeof request.headers.origin === 'string' ? request.headers.origin : '*'
-    reply.header('Access-Control-Allow-Origin', origin)
-    reply.header('Vary', 'Origin')
-    reply.header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
-    reply.header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+    applyCorsHeaders(request, reply)
 
     if (request.method === 'OPTIONS') {
       reply.code(204)
       return reply.send()
     }
+
+    const pathname = request.raw.url?.split('?')[0] || ''
+    if (isPublicPath(pathname)) {
+      return
+    }
+
+    if (!resolveRequestAuth(request).ok) {
+      sendUnauthorized(reply)
+      return reply
+    }
+  })
+
+  app.get('/api/auth/me', async (request) => {
+    const response: HttpOk<ReturnType<typeof createAuthStatusPayload>> = {
+      ok: true,
+      data: createAuthStatusPayload(request),
+    }
+    return response
+  })
+
+  app.post<{ Body: { password?: string } }>('/api/auth/login', async (request, reply) => {
+    if (!authConfig.loginEnabled) {
+      if (!authConfig.enabled) {
+        const response: HttpOk<ReturnType<typeof createAuthStatusPayload>> = {
+          ok: true,
+          data: createAuthStatusPayload(request),
+        }
+        return response
+      }
+
+      sendLoginUnavailable(reply)
+      return reply
+    }
+
+    const password = typeof request.body?.password === 'string' ? request.body.password : undefined
+    if (!verifyPanelPassword(password)) {
+      sendUnauthorized(reply, 'Invalid panel password')
+      return reply
+    }
+
+    const response: HttpOk<ReturnType<typeof createSessionCookie>> = {
+      ok: true,
+      data: createSessionCookie(reply, request),
+    }
+    return response
+  })
+
+  app.post('/api/auth/logout', async (request, reply) => {
+    if (!authConfig.enabled) {
+      const response: HttpOk<ReturnType<typeof createAuthStatusPayload>> = {
+        ok: true,
+        data: createAuthStatusPayload(request),
+      }
+      return response
+    }
+    clearSessionCookie(reply, request)
+    const response: HttpOk<ReturnType<typeof createAuthStatusPayload>> = {
+      ok: true,
+      data: {
+        ...createAuthStatusPayload(request),
+        authenticated: false,
+        expiresAt: undefined,
+      },
+    }
+    return response
   })
 
   app.get('/api/bootstrap', async () => {
@@ -154,7 +216,12 @@ async function main() {
     return response
   })
 
-  app.get('/ws', { websocket: true }, (socket, _request) => {
+  app.get('/ws', { websocket: true }, (socket, request) => {
+    if (!resolveRequestAuth(request).ok) {
+      void socket.close(1008, 'unauthorized')
+      return
+    }
+
     const ws: WebSocket = socket
     browserWsHub.addClient(ws)
     chatStreamCoordinator.registerClient(ws)

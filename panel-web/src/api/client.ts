@@ -1,4 +1,5 @@
 import { createPanelApiUrl, panelApiBaseUrl } from '../config'
+import { notifyAuthRequired } from '../auth/events'
 
 export type AgentStatus = 'online' | 'idle' | 'offline' | 'unknown'
 export type SessionStatus = 'pending' | 'opened' | 'closed'
@@ -80,6 +81,15 @@ export type StatusSnapshot = {
   recentSessions: ChatSession[]
 }
 
+export type AuthStatus = {
+  enabled: boolean
+  requiresAuth: boolean
+  authenticated: boolean
+  loginEnabled: boolean
+  apiTokenEnabled: boolean
+  expiresAt?: string
+}
+
 type HttpOk<T> = { ok: true; data: T }
 type HttpError = { ok: false; error: { code: string; message: string } }
 type HttpResponse<T> = HttpOk<T> | HttpError
@@ -130,13 +140,45 @@ type ProxyLogsSnapshot = {
   lines: ProxyLogLine[]
 }
 
-async function fetchProxyData<T>(pathname: string): Promise<T> {
-  const response = await fetch(createPanelApiUrl(pathname))
+async function readJsonResponse<T>(response: Response): Promise<HttpResponse<T>> {
+  return await response.json() as HttpResponse<T>
+}
+
+async function fetchProxyData<T>(pathname: string, init?: RequestInit, options?: { suppressAuthNotification?: boolean }): Promise<T> {
+  const response = await fetch(createPanelApiUrl(pathname), {
+    credentials: 'include',
+    ...init,
+  })
+
+  if (response.status === 401) {
+    if (!options?.suppressAuthNotification) {
+      notifyAuthRequired()
+    }
+
+    const payload = await readJsonResponse<T>(response)
+    if (!payload.ok) {
+      throw new Error(payload.error.message)
+    }
+
+    throw new Error('Authentication required')
+  }
+
   if (!response.ok) {
+    try {
+      const payload = await readJsonResponse<T>(response)
+      if (!payload.ok) {
+        throw new Error(payload.error.message)
+      }
+    } catch (error) {
+      if (error instanceof Error) {
+        throw error
+      }
+    }
+
     throw new Error(`Request failed with status ${response.status}`)
   }
 
-  const payload = await response.json() as HttpResponse<T>
+  const payload = await readJsonResponse<T>(response)
   if (!payload.ok) {
     throw new Error(payload.error.message)
   }
@@ -219,6 +261,30 @@ export function mapProxyLogLine(line: ProxyLogLine, index: number): LogEntry {
 
 export async function fetchBootstrap(): Promise<BootstrapData> {
   return fetchProxyData<BootstrapData>('/api/bootstrap')
+}
+
+export async function fetchAuthStatus(): Promise<AuthStatus> {
+  return fetchProxyData<AuthStatus>('/api/auth/me')
+}
+
+export async function loginPanel(password: string): Promise<AuthStatus> {
+  return fetchProxyData<AuthStatus>('/api/auth/login', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ password }),
+  }, {
+    suppressAuthNotification: true,
+  })
+}
+
+export async function clearAuthSession(): Promise<AuthStatus> {
+  return fetchProxyData<AuthStatus>('/api/auth/logout', {
+    method: 'POST',
+  }, {
+    suppressAuthNotification: true,
+  })
 }
 
 export async function fetchAgents(): Promise<AgentSummary[]> {
