@@ -264,7 +264,7 @@ export function applyCorsHeaders(request: FastifyRequest, reply: FastifyReply) {
     reply.header('Access-Control-Allow-Credentials', 'true')
   }
 
-  reply.header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
+  reply.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS')
   reply.header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
 }
 

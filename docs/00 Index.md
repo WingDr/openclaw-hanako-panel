@@ -16,7 +16,8 @@
 - 如果要支持局域网 HTTP 访问，推荐加一个薄网关 panel proxy
 - 当前 `panel-proxy` 鉴权采用双轨模型：浏览器走 panel 密码登录 + session cookie，脚本调试走 Bearer API token
 - 前端当前最推荐的组合是 `React + TypeScript + Vite + React Router + Zustand + TanStack Query + TailwindCSS`
-- 如果先做首版，前端和 proxy 都应该明显收缩，只保留分 agent chat、log 监控、agent/channel 状态监控三条主线
+- `/chat` 右侧 rail 已固定为 `Workspace(上) + Cron(下)`
+- `Workspace` 与 `Cron` 已在 web / proxy 两侧拆成独立模块链路
 
 ## 文档目录
 
@@ -65,6 +66,15 @@
 - `15 Proxy 鉴权机制 2026-03-25`
 
   - 固定当前已实现的浏览器登录、session cookie、Bearer API token 与单独调试方式
+- `16 Workspace 与 Cron 右侧模块架构 2026-03-25`
+
+  - 固定右侧 rail 的 2x2 模块拆分、前后端责任边界和数据流
+- `17 Workspace 与 Cron 接口说明 2026-03-25`
+
+  - 汇总 workspace / cron / chat.inject 的 HTTP 与 WS 接口、校验与错误模型
+- `18 Workspace 与 Cron 测试说明 2026-03-25`
+
+  - 汇总 proxy API、浏览器 E2E、独立 curl 烟测的覆盖范围和结果
 - ​`90 对话记录整理 2026-03-21`
 
   - 本轮 panel 讨论的时间线与关键决策整理
@@ -81,9 +91,12 @@
 6. `13 Chat 流处理模块架构 2026-03-24`
 7. `14 Proxy Chat 与 Logs 推流同步模块设计 2026-03-24`
 8. `15 Proxy 鉴权机制 2026-03-25`
-9. ​`05 局域网 HTTP 与薄网关方案 2026-03-21`
-10. ​`06 Panel Proxy 设计 2026-03-21`
-11. ​`07 前端网页实现方案与参考实现 2026-03-22`
+9. `16 Workspace 与 Cron 右侧模块架构 2026-03-25`
+10. `17 Workspace 与 Cron 接口说明 2026-03-25`
+11. `18 Workspace 与 Cron 测试说明 2026-03-25`
+12. ​`05 局域网 HTTP 与薄网关方案 2026-03-21`
+13. ​`06 Panel Proxy 设计 2026-03-21`
+14. ​`07 前端网页实现方案与参考实现 2026-03-22`
 
 如果要追溯思路变化，再回看：
 
@@ -101,6 +114,9 @@
 - Chat 流处理模块架构（含 Mermaid 状态机与架构图）
 - Proxy chat/logs 推流同步模块设计（含透传策略决策）
 - Proxy 鉴权机制（含 panel 密码登录与 Bearer API token 双轨模型）
+- Workspace / Cron 右侧模块架构
+- Workspace / Cron 接口说明
+- Workspace / Cron 测试说明
 
 ## 后续最适合继续补的内容
 

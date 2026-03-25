@@ -1,5 +1,6 @@
 import React from 'react'
 import { createRoot } from 'react-dom/client'
+import 'react-complex-tree/lib/style-modern.css'
 import App from './App'
 import './styles.css'
 

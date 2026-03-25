@@ -10,18 +10,21 @@
     "password:hash": "node --import tsx src/generatePasswordHash.ts",
     "password:verify": "env -u PANEL_LOGIN_PASSWORD_HASH -u PANEL_PROXY_API_TOKEN -u PANEL_SESSION_TTL_MS node --env-file=../.env --import tsx src/verifyPasswordHash.ts",
     "start": "env -u PANEL_LOGIN_PASSWORD_HASH -u PANEL_PROXY_API_TOKEN -u PANEL_SESSION_TTL_MS node --env-file=../.env dist/index.js",
-    "test": "echo 'no tests yet'"
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "license": "MIT",
   "dependencies": {
     "@fastify/websocket": "^11.2.0",
     "fastify": "^5.8.2",
-    "ws": "^8.20.0"
+    "ws": "^8.20.0",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/node": "^25.5.0",
     "@types/ws": "^8.18.1",
     "tsx": "^4.20.6",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.1"
   }
 }

@@ -4,8 +4,8 @@ import {
   type AgentSummary,
   type ChatSession,
   type TranscriptItem,
-} from '../api/client'
-import { panelRealtime } from '../realtime/ws'
+} from '../../api/client'
+import { panelRealtime } from '../../realtime/ws'
 import {
   renderLiveChat,
   renderPendingComposerMessage,
@@ -14,7 +14,7 @@ import {
 } from './ChatFlowMessageParts'
 import { ChatFlowConnectionLayer, type SyncBootstrapResult } from './runtime/ChatFlowConnectionLayer'
 import { applyChatFlowEvent } from './runtime/applyChatFlowEvent'
-import { useChatStore, type PendingComposerMessage, type ToolInvocationCard } from '../store'
+import { useChatStore, type PendingComposerMessage, type ToolInvocationCard } from '../../store'
 
 type ChatFlowModuleProps = {
   currentAgent?: AgentSummary

@@ -1,6 +1,6 @@
-import type { ChatSession } from '../../api/client'
-import { useChatStore } from '../../store'
-import type { EventEnvelope } from '../../realtime/ws'
+import type { ChatSession } from '../../../api/client'
+import { useChatStore } from '../../../store'
+import type { EventEnvelope } from '../../../realtime/ws'
 
 const asRecord = (value: unknown): Record<string, unknown> | undefined => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {

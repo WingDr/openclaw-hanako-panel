@@ -2,7 +2,7 @@
 
 ## 项目定位
 
-`openclaw-hanako-panel` 目前还是一个**文档先行**的仓库。
+`openclaw-hanako-panel` 已经进入**文档 + 实现并行**阶段。
 目标不是复刻另一个重型运维后台，而是做一个更接近 **OpenClaw 原生工作台** 的 Web Panel：
 
 - 视觉与工作台气质参考 `openhanako`
@@ -28,11 +28,20 @@
 - `agent:<agentId>:task:<slug>`
 - `agent:<agentId>:workspace:<slug>`
 
-首版阶段优先只做：
+当前已落地的主线能力：
 
 - 分 agent chat
 - 实时 log 监控
 - agent / channel / gateway 状态监控
+- 右侧 `Workspace` 文件管理 rail
+- 右侧 `Cron` 管理 rail
+
+补充说明：
+
+- `/chat` 右侧 rail 已不再是 reserved space
+- 上半区固定为 `Workspace`
+- 下半区固定为 `Cron`
+- `Workspace` 和 `Cron` 都要求在 web / proxy 两侧保持独立模块边界
 
 ## 先读哪些文档
 
@@ -42,8 +51,11 @@
 2. `docs/08 最小实现架构 首版 2026-03-22.md`
 3. `docs/05 局域网 HTTP 与薄网关方案 2026-03-21.md`
 4. `docs/06 Panel Proxy 设计 2026-03-21.md`
-5. `docs/07 前端网页实现方案与参考实现 2026-03-22.md`
-6. `docs/04 第二轮调研 实现路线与日志 2026-03-21.md`
+5. `docs/11 Panel Proxy 最小接口协议 v0.1 2026-03-22.md`
+6. `docs/16 Workspace 与 Cron 右侧模块架构 2026-03-25.md`
+7. `docs/17 Workspace 与 Cron 接口说明 2026-03-25.md`
+8. `docs/18 Workspace 与 Cron 测试说明 2026-03-25.md`
+9. `docs/07 前端网页实现方案与参考实现 2026-03-22.md`
 
 如果你需要追溯判断过程，再看：
 
@@ -79,11 +91,16 @@
 - `/chat`：工作区
 - `/manage`：管理区
 
-如果按 首版 收缩，也可以先落成：
+当前已经固定为：
 
 - `/chat`
-- `/logs`
-- `/status`
+- `/manage`
+
+其中 `/chat` 包含：
+
+- 左侧 agent / session
+- 中栏 chat
+- 右侧 `Workspace` / `Cron`
 
 ### 4. 技术选型以稳定和可扩展为先
 

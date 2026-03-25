@@ -1,11 +1,9 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { buildPasswordHash } from './auth'
 import { promptHidden } from './passwordPrompt'
 
-const currentDir = path.dirname(fileURLToPath(import.meta.url))
-const envPath = path.resolve(currentDir, '..', '..', '.env')
+const envPath = path.resolve(__dirname, '..', '..', '.env')
 const printOnlyFlags = new Set(['--print', '--print-only', '--stdout'])
 
 function upsertEnvValue(source: string, key: string, value: string): string {

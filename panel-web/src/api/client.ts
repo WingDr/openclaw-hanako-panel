@@ -64,7 +64,97 @@ export type BootstrapData = {
     chat: boolean
     logs: boolean
     status: boolean
+    workspace?: boolean
+    cron?: boolean
   }
+}
+
+export type WorkspaceNodeKind = 'file' | 'directory'
+
+export type WorkspaceTreeNode = {
+  id: string
+  name: string
+  path: string
+  kind: WorkspaceNodeKind
+  size?: number
+  updatedAt?: string
+  children?: WorkspaceTreeNode[]
+}
+
+export type WorkspaceTreeSnapshot = {
+  agentId: string
+  rootPath: string
+  path: string
+  nodes: WorkspaceTreeNode[]
+  truncated: boolean
+}
+
+export type WorkspaceFileDocument = {
+  agentId: string
+  rootPath: string
+  path: string
+  content: string
+  size: number
+  updatedAt: string
+}
+
+export type CronSessionTarget = 'main' | 'isolated' | 'current' | `session:${string}`
+export type CronScheduleKind = 'at' | 'every' | 'cron'
+export type CronPayloadKind = 'agentTurn' | 'systemEvent'
+
+export type CronDelivery = {
+  mode?: 'none' | 'announce' | 'webhook'
+  channel?: string
+  to?: string
+  accountId?: string
+  bestEffort?: boolean
+  [key: string]: unknown
+}
+
+export type RawCronJob = {
+  id?: string
+  jobId?: string
+  name?: string
+  description?: string
+  enabled?: boolean
+  agentId?: string
+  schedule?: Record<string, unknown>
+  payload?: Record<string, unknown>
+  delivery?: CronDelivery
+  sessionTarget?: CronSessionTarget
+  sessionKey?: string
+  wakeMode?: 'now' | 'next-heartbeat'
+  deleteAfterRun?: boolean
+  keepAfterRun?: boolean
+  notify?: boolean
+  state?: Record<string, unknown>
+  [key: string]: unknown
+}
+
+export type CronJobSummary = {
+  id: string
+  name: string
+  description?: string
+  enabled: boolean
+  agentId?: string
+  scheduleKind: CronScheduleKind
+  scheduleLabel: string
+  payloadKind: CronPayloadKind
+  message?: string
+  model?: string
+  thinking?: string
+  timeoutSeconds?: number
+  lightContext?: boolean
+  sessionTarget?: CronSessionTarget
+  sessionKey?: string
+  wakeMode?: 'now' | 'next-heartbeat'
+  delivery?: CronDelivery
+  nextRunAt?: string
+  lastRunAt?: string
+  lastStatus?: string
+  lastError?: string
+  lastDeliveryStatus?: string
+  raw: RawCronJob
 }
 
 export type StatusSnapshot = {
@@ -140,6 +230,10 @@ type ProxyLogsSnapshot = {
   lines: ProxyLogLine[]
 }
 
+type ProxyCronList = {
+  jobs: RawCronJob[]
+}
+
 async function readJsonResponse<T>(response: Response): Promise<HttpResponse<T>> {
   return await response.json() as HttpResponse<T>
 }
@@ -147,6 +241,7 @@ async function readJsonResponse<T>(response: Response): Promise<HttpResponse<T>>
 async function fetchProxyData<T>(pathname: string, init?: RequestInit, options?: { suppressAuthNotification?: boolean }): Promise<T> {
   const response = await fetch(createPanelApiUrl(pathname), {
     credentials: 'include',
+    cache: 'no-store',
     ...init,
   })
 
@@ -192,6 +287,24 @@ export function getPanelApiBaseUrl(): string {
 
 export function formatClockTime(value: string): string {
   return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+}
+
+export function formatDateTime(value?: string): string | undefined {
+  if (!value) {
+    return undefined
+  }
+
+  try {
+    return new Date(value).toLocaleString([], {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  } catch {
+    return value
+  }
 }
 
 export function formatRelativeTime(value?: string): string | undefined {
@@ -256,6 +369,97 @@ export function mapProxyLogLine(line: ProxyLogLine, index: number): LogEntry {
     timestamp: line.ts,
     level: line.level === 'warn' ? 'warning' : line.level,
     message: line.text,
+  }
+}
+
+export function summarizeCronSchedule(rawJob: RawCronJob): string {
+  const schedule = rawJob.schedule ?? {}
+  const kind = typeof schedule.kind === 'string' ? schedule.kind : ''
+
+  if (kind === 'every' && typeof schedule.everyMs === 'number') {
+    const minutes = schedule.everyMs / 60_000
+    if (minutes < 60) {
+      return `Every ${minutes} min`
+    }
+
+    const hours = minutes / 60
+    if (Number.isInteger(hours)) {
+      return `Every ${hours} hr`
+    }
+
+    return `Every ${hours.toFixed(1)} hr`
+  }
+
+  if (kind === 'at') {
+    const at = typeof schedule.at === 'string'
+      ? schedule.at
+      : typeof schedule.atMs === 'number'
+        ? new Date(schedule.atMs).toISOString()
+        : undefined
+    return at ? `At ${formatDateTime(at) || at}` : 'Run once'
+  }
+
+  if (kind === 'cron' && typeof schedule.expr === 'string') {
+    const tz = typeof schedule.tz === 'string' && schedule.tz.trim() ? ` · ${schedule.tz}` : ''
+    return `${schedule.expr}${tz}`
+  }
+
+  return 'Unknown schedule'
+}
+
+export function normalizeCronJob(rawJob: RawCronJob): CronJobSummary {
+  const schedule = rawJob.schedule ?? {}
+  const payload = rawJob.payload ?? {}
+  const state = rawJob.state ?? {}
+  const scheduleKind = (
+    typeof schedule.kind === 'string' && ['at', 'every', 'cron'].includes(schedule.kind)
+      ? schedule.kind
+      : 'every'
+  ) as CronScheduleKind
+  const payloadKind = (payload.kind === 'systemEvent' ? 'systemEvent' : 'agentTurn') as CronPayloadKind
+  const nextRunAt = typeof state.nextRunAtMs === 'number'
+    ? new Date(state.nextRunAtMs).toISOString()
+    : typeof state.nextRunAt === 'string'
+      ? state.nextRunAt
+      : undefined
+  const lastRunAt = typeof state.lastRunAtMs === 'number'
+    ? new Date(state.lastRunAtMs).toISOString()
+    : typeof state.lastRunAt === 'string'
+      ? state.lastRunAt
+      : undefined
+
+  return {
+    id: String(rawJob.id ?? rawJob.jobId ?? ''),
+    name: String(rawJob.name ?? rawJob.id ?? rawJob.jobId ?? 'Untitled cron'),
+    description: typeof rawJob.description === 'string' ? rawJob.description : undefined,
+    enabled: rawJob.enabled !== false,
+    agentId: typeof rawJob.agentId === 'string' ? rawJob.agentId : undefined,
+    scheduleKind,
+    scheduleLabel: summarizeCronSchedule(rawJob),
+    payloadKind,
+    message: typeof payload.message === 'string'
+      ? payload.message
+      : typeof payload.text === 'string'
+        ? payload.text
+        : undefined,
+    model: typeof payload.model === 'string' ? payload.model : undefined,
+    thinking: typeof payload.thinking === 'string' ? payload.thinking : undefined,
+    timeoutSeconds: typeof payload.timeoutSeconds === 'number' ? payload.timeoutSeconds : undefined,
+    lightContext: payload.lightContext === true,
+    sessionTarget: typeof rawJob.sessionTarget === 'string' ? rawJob.sessionTarget as CronSessionTarget : undefined,
+    sessionKey: typeof rawJob.sessionKey === 'string' ? rawJob.sessionKey : undefined,
+    wakeMode: rawJob.wakeMode === 'next-heartbeat' ? 'next-heartbeat' : rawJob.wakeMode === 'now' ? 'now' : undefined,
+    delivery: rawJob.delivery,
+    nextRunAt,
+    lastRunAt,
+    lastStatus: typeof state.lastStatus === 'string'
+      ? state.lastStatus
+      : typeof state.lastRunStatus === 'string'
+        ? state.lastRunStatus
+        : undefined,
+    lastError: typeof state.lastError === 'string' ? state.lastError : undefined,
+    lastDeliveryStatus: typeof state.lastDeliveryStatus === 'string' ? state.lastDeliveryStatus : undefined,
+    raw: rawJob,
   }
 }
 
@@ -328,4 +532,86 @@ export async function fetchStatus(): Promise<StatusSnapshot> {
     channels: snapshot.channels,
     recentSessions: snapshot.recentSessions.map(mapProxySession),
   }
+}
+
+export async function fetchWorkspaceTree(agentId: string, requestedPath = ''): Promise<WorkspaceTreeSnapshot> {
+  const query = requestedPath ? `?path=${encodeURIComponent(requestedPath)}` : ''
+  return await fetchProxyData<WorkspaceTreeSnapshot>(`/api/workspace/${encodeURIComponent(agentId)}/tree${query}`)
+}
+
+export async function fetchWorkspaceFile(agentId: string, requestedPath: string): Promise<WorkspaceFileDocument> {
+  return await fetchProxyData<WorkspaceFileDocument>(
+    `/api/workspace/${encodeURIComponent(agentId)}/file?path=${encodeURIComponent(requestedPath)}`,
+  )
+}
+
+export async function saveWorkspaceFile(agentId: string, requestedPath: string, content: string): Promise<WorkspaceFileDocument> {
+  return await fetchProxyData<WorkspaceFileDocument>(`/api/workspace/${encodeURIComponent(agentId)}/file`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      path: requestedPath,
+      content,
+    }),
+  })
+}
+
+export async function fetchCronJobs(agentId?: string): Promise<CronJobSummary[]> {
+  const query = agentId ? `?agentId=${encodeURIComponent(agentId)}` : ''
+  const payload = await fetchProxyData<ProxyCronList>(`/api/cron${query}`)
+  return (payload.jobs ?? []).map(normalizeCronJob)
+}
+
+export async function validateCronDefinition(payload: { job?: Record<string, unknown>; patch?: Record<string, unknown> }): Promise<Record<string, unknown>> {
+  return await fetchProxyData<Record<string, unknown>>('/api/cron/validate', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function createCronDefinition(job: Record<string, unknown>): Promise<Record<string, unknown>> {
+  return await fetchProxyData<Record<string, unknown>>('/api/cron', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ job }),
+  })
+}
+
+export async function updateCronDefinition(jobId: string, patch: Record<string, unknown>): Promise<Record<string, unknown>> {
+  return await fetchProxyData<Record<string, unknown>>(`/api/cron/${encodeURIComponent(jobId)}`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ patch }),
+  })
+}
+
+export async function deleteCronDefinition(jobId: string): Promise<Record<string, unknown>> {
+  return await fetchProxyData<Record<string, unknown>>(`/api/cron/${encodeURIComponent(jobId)}`, {
+    method: 'DELETE',
+  })
+}
+
+export async function runCronDefinition(jobId: string): Promise<Record<string, unknown>> {
+  return await fetchProxyData<Record<string, unknown>>(`/api/cron/${encodeURIComponent(jobId)}/run`, {
+    method: 'POST',
+  })
+}
+
+export async function toggleCronDefinition(jobId: string, enabled: boolean): Promise<Record<string, unknown>> {
+  return await fetchProxyData<Record<string, unknown>>(`/api/cron/${encodeURIComponent(jobId)}/toggle`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ enabled }),
+  })
 }

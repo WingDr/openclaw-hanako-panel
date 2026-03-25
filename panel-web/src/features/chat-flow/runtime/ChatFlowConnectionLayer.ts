@@ -1,4 +1,4 @@
-import type { EventEnvelope, RealtimeClient } from '../../realtime/ws'
+import type { EventEnvelope, RealtimeClient } from '../../../realtime/ws'
 
 type ProxyChatHistoryItem = {
   messageId: string

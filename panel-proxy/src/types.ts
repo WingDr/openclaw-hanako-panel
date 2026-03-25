@@ -62,6 +62,8 @@ export type BootstrapResponse = {
     chat: boolean
     logs: boolean
     status: boolean
+    workspace?: boolean
+    cron?: boolean
   }
 }
 

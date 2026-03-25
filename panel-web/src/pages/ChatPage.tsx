@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react'
 import { mapProxySession, type ChatSession } from '../api/client'
-import { ChatFlowModule } from '../chat-flow/ChatFlowModule'
+import { ChatFlowModule } from '../features/chat-flow/ChatFlowModule'
 import { panelRealtime } from '../realtime/ws'
 import { useChatStore, type PendingComposerMessage } from '../store'
 

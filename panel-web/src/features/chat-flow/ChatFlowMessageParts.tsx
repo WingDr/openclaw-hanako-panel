@@ -1,6 +1,6 @@
 import React from 'react'
-import type { TranscriptItem, ToolInvocation } from '../api/client'
-import type { LiveChatState, PendingComposerMessage, ToolInvocationCard } from '../store'
+import type { TranscriptItem, ToolInvocation } from '../../api/client'
+import type { LiveChatState, PendingComposerMessage, ToolInvocationCard } from '../../store'
 import { MessageMarkdown } from './MessageMarkdown'
 
 type ToolCardMeta = {

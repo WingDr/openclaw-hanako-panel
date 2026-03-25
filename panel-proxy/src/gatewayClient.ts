@@ -106,6 +106,11 @@ export type ChatSendResult = {
   runId?: string
 }
 
+export type ChatInjectResult = {
+  accepted: boolean
+  sessionKey: string
+}
+
 export type ChatAbortResult = {
   accepted: boolean
 }
@@ -115,6 +120,12 @@ export type SessionCreateResult = {
   created: boolean
   sessionKey: string
   session: Session
+}
+
+export type GatewayAgentCatalogEntry = {
+  agentId: string
+  label: string
+  workspace?: string
 }
 
 const trimToUndefined = (value?: string): string | undefined => {
@@ -1734,6 +1745,18 @@ export class GatewayLogsClient {
     }
   }
 
+  async chatInject(params: { sessionKey: string; message: string }): Promise<ChatInjectResult> {
+    await this.request('chat.inject', {
+      sessionKey: params.sessionKey,
+      message: params.message,
+    })
+
+    return {
+      accepted: true,
+      sessionKey: params.sessionKey,
+    }
+  }
+
   async chatAbort(params: { sessionKey?: string; runId?: string }): Promise<ChatAbortResult> {
     await this.request('chat.abort', params.sessionKey
       ? { sessionKey: params.sessionKey }
@@ -1830,6 +1853,53 @@ export class GatewayLogsClient {
     }
 
     return sessions.filter((session) => session.agentId === agentId)
+  }
+
+  async rawAgentsCatalog(): Promise<GatewayAgentCatalogEntry[]> {
+    const payload = await this.request('agents.list')
+    const record = asRecord(payload)
+    const rawAgents = Array.isArray(record?.agents) ? record.agents : Array.isArray(payload) ? payload : []
+    const agents: GatewayAgentCatalogEntry[] = []
+
+    for (const rawAgent of rawAgents) {
+      const agentRecord = asRecord(rawAgent)
+      if (!agentRecord) {
+        continue
+      }
+
+      const agentId = asString(agentRecord.id)
+      if (!agentId) {
+        continue
+      }
+
+      agents.push({
+        agentId,
+        label: asString(agentRecord.name) ?? agentId,
+        workspace: asString(agentRecord.workspace),
+      })
+    }
+
+    return agents
+  }
+
+  async cronList(): Promise<unknown> {
+    return await this.request('cron.list')
+  }
+
+  async cronAdd(job: Record<string, unknown>): Promise<unknown> {
+    return await this.request('cron.add', { job })
+  }
+
+  async cronUpdate(jobId: string, patch: Record<string, unknown>): Promise<unknown> {
+    return await this.request('cron.update', { jobId, patch })
+  }
+
+  async cronRemove(jobId: string): Promise<unknown> {
+    return await this.request('cron.remove', { jobId })
+  }
+
+  async cronRun(jobId: string): Promise<unknown> {
+    return await this.request('cron.run', { jobId })
   }
 
   private nextRequestId(prefix: string): string {
@@ -2100,7 +2170,7 @@ export async function bootstrap(): Promise<BootstrapResponse> {
     proxyVersion: '0.1.0',
     gateway: { connected: connection.connected, mode: 'proxy' },
     defaultAgentId,
-    features: { chat: true, logs: true, status: true },
+    features: { chat: true, logs: true, status: true, workspace: true, cron: true },
   }
 }
 
@@ -2137,8 +2207,36 @@ export async function sendChatMessage(params: { sessionKey: string; message: str
   return gatewayLogsClient.chatSend(params)
 }
 
+export async function sendChatInjection(params: { sessionKey: string; message: string }): Promise<ChatInjectResult> {
+  return gatewayLogsClient.chatInject(params)
+}
+
 export async function abortChatRun(params: { sessionKey?: string; runId?: string }): Promise<ChatAbortResult> {
   return gatewayLogsClient.chatAbort(params)
+}
+
+export async function fetchGatewayAgentCatalog(): Promise<GatewayAgentCatalogEntry[]> {
+  return await gatewayLogsClient.rawAgentsCatalog()
+}
+
+export async function listCronJobs(): Promise<unknown> {
+  return await gatewayLogsClient.cronList()
+}
+
+export async function createCronJob(job: Record<string, unknown>): Promise<unknown> {
+  return await gatewayLogsClient.cronAdd(job)
+}
+
+export async function updateCronJob(jobId: string, patch: Record<string, unknown>): Promise<unknown> {
+  return await gatewayLogsClient.cronUpdate(jobId, patch)
+}
+
+export async function deleteCronJob(jobId: string): Promise<unknown> {
+  return await gatewayLogsClient.cronRemove(jobId)
+}
+
+export async function runCronJob(jobId: string): Promise<unknown> {
+  return await gatewayLogsClient.cronRun(jobId)
 }
 
 export async function createPanelSession(agentId: string, title?: string): Promise<SessionCreateResult> {

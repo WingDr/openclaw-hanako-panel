@@ -11,7 +11,14 @@ exports.fetchAgentSessions = fetchAgentSessions;
 exports.fetchSessions = fetchSessions;
 exports.fetchChatHistory = fetchChatHistory;
 exports.sendChatMessage = sendChatMessage;
+exports.sendChatInjection = sendChatInjection;
 exports.abortChatRun = abortChatRun;
+exports.fetchGatewayAgentCatalog = fetchGatewayAgentCatalog;
+exports.listCronJobs = listCronJobs;
+exports.createCronJob = createCronJob;
+exports.updateCronJob = updateCronJob;
+exports.deleteCronJob = deleteCronJob;
+exports.runCronJob = runCronJob;
 exports.createPanelSession = createPanelSession;
 const node_crypto_1 = __importDefault(require("node:crypto"));
 const node_fs_1 = __importDefault(require("node:fs"));
@@ -1345,6 +1352,16 @@ class GatewayLogsClient {
             runId: asString(pickFirst(record ?? {}, ['runId', 'responseId', 'chatId'])),
         };
     }
+    async chatInject(params) {
+        await this.request('chat.inject', {
+            sessionKey: params.sessionKey,
+            message: params.message,
+        });
+        return {
+            accepted: true,
+            sessionKey: params.sessionKey,
+        };
+    }
     async chatAbort(params) {
         await this.request('chat.abort', params.sessionKey
             ? { sessionKey: params.sessionKey }
@@ -1424,6 +1441,43 @@ class GatewayLogsClient {
             return sessions;
         }
         return sessions.filter((session) => session.agentId === agentId);
+    }
+    async rawAgentsCatalog() {
+        const payload = await this.request('agents.list');
+        const record = asRecord(payload);
+        const rawAgents = Array.isArray(record?.agents) ? record.agents : Array.isArray(payload) ? payload : [];
+        const agents = [];
+        for (const rawAgent of rawAgents) {
+            const agentRecord = asRecord(rawAgent);
+            if (!agentRecord) {
+                continue;
+            }
+            const agentId = asString(agentRecord.id);
+            if (!agentId) {
+                continue;
+            }
+            agents.push({
+                agentId,
+                label: asString(agentRecord.name) ?? agentId,
+                workspace: asString(agentRecord.workspace),
+            });
+        }
+        return agents;
+    }
+    async cronList() {
+        return await this.request('cron.list');
+    }
+    async cronAdd(job) {
+        return await this.request('cron.add', { job });
+    }
+    async cronUpdate(jobId, patch) {
+        return await this.request('cron.update', { jobId, patch });
+    }
+    async cronRemove(jobId) {
+        return await this.request('cron.remove', { jobId });
+    }
+    async cronRun(jobId) {
+        return await this.request('cron.run', { jobId });
     }
     nextRequestId(prefix) {
         this.requestSeq += 1;
@@ -1658,7 +1712,7 @@ async function bootstrap() {
         proxyVersion: '0.1.0',
         gateway: { connected: connection.connected, mode: 'proxy' },
         defaultAgentId,
-        features: { chat: true, logs: true, status: true },
+        features: { chat: true, logs: true, status: true, workspace: true, cron: true },
     };
 }
 async function fetchAgents() {
@@ -1690,8 +1744,29 @@ async function fetchChatHistory(sessionKey) {
 async function sendChatMessage(params) {
     return exports.gatewayLogsClient.chatSend(params);
 }
+async function sendChatInjection(params) {
+    return exports.gatewayLogsClient.chatInject(params);
+}
 async function abortChatRun(params) {
     return exports.gatewayLogsClient.chatAbort(params);
+}
+async function fetchGatewayAgentCatalog() {
+    return await exports.gatewayLogsClient.rawAgentsCatalog();
+}
+async function listCronJobs() {
+    return await exports.gatewayLogsClient.cronList();
+}
+async function createCronJob(job) {
+    return await exports.gatewayLogsClient.cronAdd(job);
+}
+async function updateCronJob(jobId, patch) {
+    return await exports.gatewayLogsClient.cronUpdate(jobId, patch);
+}
+async function deleteCronJob(jobId) {
+    return await exports.gatewayLogsClient.cronRemove(jobId);
+}
+async function runCronJob(jobId) {
+    return await exports.gatewayLogsClient.cronRun(jobId);
 }
 async function createPanelSession(agentId, title) {
     const session = buildPanelSession(agentId, title);

@@ -1,91 +1,14 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { fetchLogs, fetchStatus, formatClockTime, formatRelativeTime, mapProxyLogLine } from '../api/client'
-import type { LogEntry, StatusSnapshot } from '../api/client'
-import { panelRealtime } from '../realtime/ws'
-
-type RealtimeLogsAppendPayload = {
-  cursor: number
-  lines: Array<{
-    ts: string
-    level: 'info' | 'warn' | 'error'
-    text: string
-  }>
-}
-
-type RealtimeLogsResetPayload = {
-  reason: string
-}
-
-type SystemConnectionPayload = {
-  source: 'gateway'
-  connected: boolean
-  at: string
-  message?: string
-}
-
-const autoFollowThresholdPx = 32
-
-function isNearBottom(element: HTMLDivElement): boolean {
-  const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight
-  return distanceFromBottom <= autoFollowThresholdPx
-}
+import React, { useEffect, useState } from 'react'
+import { fetchStatus, formatClockTime, formatRelativeTime, type StatusSnapshot } from '../api/client'
+import { LogsStreamModule } from '../features/logs/LogsStreamModule'
+import { useRealtimeLogs } from '../features/logs/useRealtimeLogs'
 
 export default function ManagePage() {
   const [activeManageView, setActiveManageView] = useState<'status' | 'logs'>('status')
   const [status, setStatus] = useState<StatusSnapshot | null>(null)
   const [statusLoading, setStatusLoading] = useState(true)
   const [statusError, setStatusError] = useState<string | null>(null)
-  const [logs, setLogs] = useState<LogEntry[]>([])
-  const [search, setSearch] = useState('')
-  const [logsLoading, setLogsLoading] = useState(true)
-  const [logsError, setLogsError] = useState<string | null>(null)
-  const [live, setLive] = useState(false)
-  const [connectionMessage, setConnectionMessage] = useState<string | null>(null)
-  const [autoFollow, setAutoFollow] = useState(true)
-  const logListRef = useRef<HTMLDivElement | null>(null)
-  const previousFilteredLogCountRef = useRef(0)
-  const scrollIgnoreUntilRef = useRef(0)
-  const scrollFrameRef = useRef<number | null>(null)
-
-  const scrollToBottom = () => {
-    if (scrollFrameRef.current !== null) {
-      window.cancelAnimationFrame(scrollFrameRef.current)
-    }
-
-    scrollFrameRef.current = window.requestAnimationFrame(() => {
-      const element = logListRef.current
-      if (!element) {
-        return
-      }
-
-      scrollIgnoreUntilRef.current = Date.now() + 180
-      element.scrollTop = element.scrollHeight
-
-      window.requestAnimationFrame(() => {
-        const nextElement = logListRef.current
-        if (!nextElement) {
-          return
-        }
-
-        if (isNearBottom(nextElement)) {
-          setAutoFollow(true)
-        }
-      })
-    })
-  }
-
-  const updateAutoFollow = () => {
-    const element = logListRef.current
-    if (!element) {
-      return
-    }
-
-    if (Date.now() < scrollIgnoreUntilRef.current) {
-      return
-    }
-
-    setAutoFollow(isNearBottom(element))
-  }
+  const logsController = useRealtimeLogs()
 
   useEffect(() => {
     let cancelled = false
@@ -120,101 +43,12 @@ export default function ManagePage() {
   }, [])
 
   useEffect(() => {
-    let cancelled = false
-    const unsubscribe = panelRealtime.subscribe((event) => {
-      if (cancelled) {
-        return
-      }
-
-      if (event.event === 'logs.reset') {
-        const payload = event.payload as RealtimeLogsResetPayload
-        setLogs([])
-        setConnectionMessage(payload.reason === 'subscribed' ? null : `Logs reset: ${payload.reason}`)
-      }
-
-      if (event.event === 'logs.append') {
-        const payload = event.payload as RealtimeLogsAppendPayload
-        setLogs((current) => [
-          ...current,
-          ...payload.lines.map((line, index) => mapProxyLogLine(line, current.length + index)),
-        ])
-      }
-
-      if (event.event === 'system.connection') {
-        const payload = event.payload as SystemConnectionPayload
-        setLive(payload.connected)
-        setConnectionMessage(payload.message || null)
-      }
-    })
-
-    const loadLogs = async () => {
-      setLogsLoading(true)
-      setLogsError(null)
-
-      try {
-        const snapshot = await fetchLogs()
-        if (!cancelled) {
-          setLogs(snapshot)
-        }
-
-        await panelRealtime.sendCommand('logs.subscribe', {})
-        if (!cancelled) {
-          setConnectionMessage(null)
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setLogsError(error instanceof Error ? error.message : 'Failed to load logs')
-          setLive(false)
-        }
-      } finally {
-        if (!cancelled) {
-          setLogsLoading(false)
-        }
-      }
-    }
-
-    void loadLogs()
-
-    return () => {
-      cancelled = true
-      if (scrollFrameRef.current !== null) {
-        window.cancelAnimationFrame(scrollFrameRef.current)
-      }
-      unsubscribe()
-      void panelRealtime.sendCommand('logs.unsubscribe', {}).catch(() => {})
-    }
-  }, [])
-
-  const filteredLogs = useMemo(
-    () => logs.filter((log) => {
-      if (!search.trim()) {
-        return true
-      }
-
-      const query = search.trim().toLowerCase()
-      return `${log.level} ${log.message} ${log.timestamp}`.toLowerCase().includes(query)
-    }),
-    [logs, search],
-  )
-
-  useEffect(() => {
-    const previousCount = previousFilteredLogCountRef.current
-    previousFilteredLogCountRef.current = filteredLogs.length
-
-    if (!autoFollow) {
+    if (activeManageView !== 'logs' || !logsController.autoFollow) {
       return
     }
 
-    scrollToBottom()
-  }, [autoFollow, filteredLogs.length])
-
-  useEffect(() => {
-    if (activeManageView !== 'logs' || !autoFollow) {
-      return
-    }
-
-    scrollToBottom()
-  }, [activeManageView, autoFollow])
+    logsController.scrollToBottom()
+  }, [activeManageView, logsController.autoFollow, logsController.scrollToBottom])
 
   const onlineAgents = status?.agents.filter((agent) => agent.status === 'online').length ?? 0
   const connectedChannels = status?.channels.filter((channel) => channel.status === 'connected').length ?? 0
@@ -253,8 +87,8 @@ export default function ManagePage() {
           <h1>System pulse and live proxy logs in one place.</h1>
         </div>
         <div className="pw-manage-hero-meta">
-          <span className={`pw-live-pill ${live ? 'is-live' : 'is-offline'}`}>
-            {live ? (autoFollow ? 'Live log stream' : 'Live stream paused') : 'Snapshot only'}
+          <span className={`pw-live-pill ${logsController.live ? 'is-live' : 'is-offline'}`}>
+            {logsController.live ? (logsController.autoFollow ? 'Live log stream' : 'Live stream paused') : 'Snapshot only'}
           </span>
           {status?.gateway.lastUpdatedAt && (
             <span className="pw-hero-time">
@@ -378,52 +212,8 @@ export default function ManagePage() {
                 <p className="pw-section-kicker">Logs</p>
                 <h2>Realtime proxy stream</h2>
               </div>
-              <div className="pw-log-toolbar">
-                <input
-                  className="pw-log-search"
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                  placeholder="Filter log lines"
-                />
-                <button className="pw-secondary-button" onClick={() => setSearch('')}>
-                  Clear
-                </button>
-                {!autoFollow && (
-                <button
-                  className="pw-secondary-button"
-                  onClick={() => {
-                      setAutoFollow(true)
-                      scrollToBottom()
-                    }}
-                  >
-                    Jump to latest
-                  </button>
-                )}
-              </div>
             </div>
-
-            {logsError && <div className="pw-error-banner">{logsError}</div>}
-            {connectionMessage && !logsError && <div className="pw-inline-note">{connectionMessage}</div>}
-
-            <div
-              ref={logListRef}
-              className="pw-log-stream"
-              onScroll={updateAutoFollow}
-            >
-              {logsLoading && <div className="pw-empty-state">Loading logs...</div>}
-              {!logsLoading && filteredLogs.length === 0 && (
-                <div className="pw-empty-state">No logs match the current filter.</div>
-              )}
-              {filteredLogs.map((log) => (
-                <div key={log.id} className="pw-log-line">
-                  <span className="pw-log-time">{log.time}</span>
-                  <span className={`pw-log-level tone-${log.level === 'error' ? 'bad' : log.level === 'warning' ? 'warn' : 'accent'}`}>
-                    {log.level.toUpperCase()}
-                  </span>
-                  <span className="pw-log-message">{log.message}</span>
-                </div>
-              ))}
-            </div>
+            <LogsStreamModule controller={logsController} variant="card" />
           </article>
         )}
       </section>

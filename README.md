@@ -2,7 +2,87 @@
 
 参考 `liliMozi/openhanako` 的工作台气质，为 OpenClaw 设计一个 **web-only** 的监控 / 控制面板，并保留面向 agent 的独立 chat 工作区。
 
-当前仓库仍处在 **文档先行、方案收束** 阶段，核心目标已经比较明确：
+当前仓库已经不再只是“文档先行”。`panel-web` 和 `panel-proxy` 都已有可运行实现，`/chat` 页面右侧 rail 已落成两个正式模块：
+
+- 上半区：`Workspace`
+- 下半区：`Cron`
+
+这两块都按独立链路拆到了 web 和 proxy 两侧：
+
+- web `WorkspacePanelModule` + proxy workspace API
+- web `CronPanelModule` + proxy cron API
+
+## 当前状态
+
+当前已实现的最小闭环包括：
+
+- 分 agent chat
+- 实时 log 监控
+- agent / channel / gateway 状态监控
+- 右侧 `Workspace` 文件树、文件打开、CodeMirror 编辑、保存、添加到聊天
+- 右侧 `Cron` 列表、启停、立即运行、创建、编辑、删除
+- `CronConfigDialog` 的结构化模式和 JSON 模式
+- `chat.inject` 文件注入链路
+
+## 运行方式
+
+根目录 `.env` 配好之后，分别启动：
+
+```bash
+cd panel-proxy
+npm install
+npm run dev
+```
+
+```bash
+cd panel-web
+npm install
+npm run dev
+```
+
+默认开发入口：
+
+- `http://127.0.0.1:5173/chat`
+- `http://127.0.0.1:5173/manage`
+
+如果使用局域网 HTTP 模式，前端通过 `panel-proxy` 访问 Gateway。  
+如果使用浏览器自动化测试，`panel-web/playwright.config.ts` 会起一套独立的 mock gateway + fixture proxy + web dev server。
+
+## 测试命令
+
+Proxy API / 单元测试：
+
+```bash
+cd panel-proxy
+npm test
+npm run build
+```
+
+Web 构建与浏览器测试：
+
+```bash
+cd panel-web
+npm run build
+npm run test:e2e
+```
+
+## 右侧 Rail 使用说明
+
+### Workspace
+
+- 选择右侧文件树中的文件
+- 点击 `Open file`
+- 在弹窗里使用 CodeMirror 编辑并保存
+- 点击 `Add to chat` 可把全文或当前选中片段注入当前 session
+
+### Cron
+
+- 点击 `New cron` 创建任务
+- `Structured` 模式面向 `main` / `isolated` 两条主路径
+- `JSON` 模式可直接编辑完整 Gateway job shape
+- 支持 `Run now`、`Enable/Disable`、`Edit`、`Delete`
+
+当前仓库仍保留 **文档先行、实现同步推进** 的方式，核心目标已经比较明确：
 
 - 做成 OpenClaw 原生工作台，而不是另一个重型运维后台
 - 让 `chat` 和 `manage` 在统一主题下明确分区
@@ -112,10 +192,8 @@
 为了避免项目过早变重，下面这些功能不作为首版前提：
 
 - config 编辑
-- cron 管理
 - skills 管理
 - models 管理
-- 文件管理
 - 多用户权限
 - session pin / tag / archive
 - 命令面板
@@ -191,7 +269,7 @@
 - 三栏工作台布局
 - 左侧：agent 列表，以及展开后的对话 session 列表
 - 中间：当前 chat 工作区
-- 右侧：预留扩展栏
+- 右侧：`Workspace` + `Cron` 模块 rail
 - 顶部：居中的 `Chat / Manage panel` 主切换
 
 ### `/manage`
@@ -237,9 +315,12 @@
 4. `docs/10 Gateway WS 客户端数据流草案 2026-03-22.md`
 5. `docs/11 Panel Proxy 最小接口协议 v0.1 2026-03-22.md`
 6. `docs/15 Proxy 鉴权机制 2026-03-25.md`
-7. `docs/05 局域网 HTTP 与薄网关方案 2026-03-21.md`
-8. `docs/06 Panel Proxy 设计 2026-03-21.md`
-9. `docs/07 前端网页实现方案与参考实现 2026-03-22.md`
+7. `docs/16 Workspace 与 Cron 右侧模块架构 2026-03-25.md`
+8. `docs/17 Workspace 与 Cron 接口说明 2026-03-25.md`
+9. `docs/18 Workspace 与 Cron 测试说明 2026-03-25.md`
+10. `docs/05 局域网 HTTP 与薄网关方案 2026-03-21.md`
+11. `docs/06 Panel Proxy 设计 2026-03-21.md`
+12. `docs/07 前端网页实现方案与参考实现 2026-03-22.md`
 
 如果要追溯完整决策过程，再看：
 
@@ -254,6 +335,9 @@
 - `docs/10 Gateway WS 客户端数据流草案 2026-03-22.md`
 - `docs/11 Panel Proxy 最小接口协议 v0.1 2026-03-22.md`
 - `docs/15 Proxy 鉴权机制 2026-03-25.md`
+- `docs/16 Workspace 与 Cron 右侧模块架构 2026-03-25.md`
+- `docs/17 Workspace 与 Cron 接口说明 2026-03-25.md`
+- `docs/18 Workspace 与 Cron 测试说明 2026-03-25.md`
 
 这四份文档已经把首版前端骨架、Gateway 实时数据流、panel proxy 最小协议和当前鉴权模型整理成了可以直接进入编码阶段的草案。
 
