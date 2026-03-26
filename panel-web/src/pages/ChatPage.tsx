@@ -91,23 +91,19 @@ export default function ChatPage() {
         ? `${currentAgent.name} · ${currentAgent.status}`
         : 'Waiting for agent'
 
-  return (
-    <div className="pw-chat-page">
-      <header className="pw-chat-hero pw-chat-hero-compact">
-        <div className="pw-chat-actions">
-          <div className="pw-chat-presence">
-            <span className="pw-presence-dot" style={{ backgroundColor: statusColor[currentAgent?.status || 'unknown'] }} />
-            <span>{presenceText}</span>
+return (
+    <div className="pw-chat-page" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {currentSessionId && (
+        <header className="pw-chat-hero pw-chat-hero-compact">
+          <div className="pw-chat-actions">
+            <div className="pw-chat-presence">
+              <span className="pw-presence-dot" style={{ backgroundColor: statusColor[currentAgent?.status || 'unknown'] }} />
+              <span>{presenceText}</span>
+            </div>
+            {/* Removed redundant 'New session' button since it's on the agent list now */}
           </div>
-          <button
-            className="pw-primary-button"
-            onClick={() => void onCreateSession()}
-            disabled={!currentAgentId || createPending || currentAgentOffline}
-          >
-            {createPending ? 'Creating session...' : 'New session'}
-          </button>
-        </div>
-      </header>
+        </header>
+      )}
       {createError && <div className="pw-inline-note">{createError}</div>}
 
       <ChatFlowModule

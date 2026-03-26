@@ -352,14 +352,32 @@ export function ChatFlowModule(props: ChatFlowModuleProps) {
     }
   }
 
+  
+  if (!currentSessionId) {
+    return (
+      <section className="pw-chat-surface" aria-label="Chat workspace" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', background: 'transparent', border: 'none', boxShadow: 'none' }}>
+        <div style={{ textAlign: 'center', opacity: 0.5, maxWidth: 600, width: '100%' }}>
+          <h2 style={{ fontSize: '2em', marginBottom: '20px', fontWeight: 'normal' }}>OpenClaw Hanako</h2>
+          <div className="pw-input-shell" style={{ margin: '0 auto' }}>
+            <div className="pw-input-textarea-shell">
+              <textarea
+                rows={1}
+                disabled
+                placeholder="Select or create a (+ New) session from the left panel..."
+                className="pw-chat-input"
+                style={{ textAlign: 'center', minHeight: '50px', fontSize: '1.1em', padding: '10px 15px', background: 'transparent' }}
+              />
+            </div>
+          </div>
+        </div>
+      </section>
+    )
+  }
+
   return (
     <section className="pw-chat-surface" aria-label="Chat workspace">
       <div ref={messageStreamRef} className="pw-message-stream">
-        {!currentSessionId && (
-          <div className="pw-empty-state">
-            No session available for the selected agent yet.
-          </div>
-        )}
+
         {currentSessionId && historyPending && !hasVisibleContent && (
           <div className="pw-empty-state">
             Loading conversation history...

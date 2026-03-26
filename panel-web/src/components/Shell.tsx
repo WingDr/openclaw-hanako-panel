@@ -3,6 +3,8 @@ import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { fetchAgents, fetchBootstrap, fetchSessions, formatRelativeTime, type ChatSession } from '../api/client'
 import { RightRailModulesHost } from '../features/rail/RightRailModulesHost'
 import { useChatStore } from '../store'
+import { panelRealtime } from '../realtime/ws'
+import { mapProxySession } from '../api/client'
 
 const statusLabelTone: Record<string, string> = {
   online: 'tone-good',
@@ -14,11 +16,11 @@ const statusLabelTone: Record<string, string> = {
   closed: 'tone-muted',
 }
 
-const LEFT_PANEL_DEFAULT_WIDTH = 320
-const LEFT_PANEL_MIN_WIDTH = 240
-const RIGHT_PANEL_DEFAULT_WIDTH = 280
-const RIGHT_PANEL_MIN_WIDTH = 240
-const MAIN_PANEL_MIN_WIDTH = 520
+const LEFT_PANEL_DEFAULT_WIDTH = 240
+const LEFT_PANEL_MIN_WIDTH = 200
+const RIGHT_PANEL_DEFAULT_WIDTH = 240
+const RIGHT_PANEL_MIN_WIDTH = 200
+const MAIN_PANEL_MIN_WIDTH = 400
 const PANEL_SPLITTER_WIDTH = 32
 
 type PanelSide = 'left' | 'right'
@@ -148,6 +150,7 @@ export default function Shell({ children }: { children?: React.ReactNode }) {
   const setCurrentAgentId = useChatStore((state) => state.setCurrentAgentId)
   const replaceAgentSessions = useChatStore((state) => state.replaceAgentSessions)
   const setSessionId = useChatStore((state) => state.setSessionId)
+  const upsertAgentSession = useChatStore((state) => state.upsertAgentSession)
   const [loadingAgents, setLoadingAgents] = React.useState(true)
   const [loadingSessionAgentIds, setLoadingSessionAgentIds] = React.useState<string[]>([])
   const [expandedAgentIds, setExpandedAgentIds] = React.useState<string[]>([])
@@ -381,6 +384,20 @@ export default function Shell({ children }: { children?: React.ReactNode }) {
     ))
   }
 
+  
+  const handleCreateSession = async (targetAgentId: string) => {
+    try {
+      const response = await panelRealtime.sendCommand('session.create', { agentId: targetAgentId })
+      const created = (response.result as any)?.session
+      if (created) {
+        upsertAgentSession(mapProxySession(created))
+        setSessionId(created.sessionKey || created.id)
+      }
+    } catch (e) {
+      console.error(e)
+    }
+  }
+
   const handleSelectSession = (agentId: string, sessionId: string) => {
     if (agentId !== currentAgentId) {
       setCurrentAgentId(agentId)
@@ -473,9 +490,9 @@ export default function Shell({ children }: { children?: React.ReactNode }) {
               </div>
 
               <div className="pw-agent-list">
-                {loadingAgents && <div className="pw-empty-state">Loading agents...</div>}
+                {loadingAgents && <div className="pw-empty-state">⏳ Loading...</div>}
                 {!loadingAgents && agents.length === 0 && (
-                  <div className="pw-empty-state">No agents returned by panel-proxy.</div>
+                  <div className="pw-empty-state">∅ No agents active</div>
                 )}
                 {agents.map((agent) => {
                   const active = agent.id === currentAgentId
@@ -491,33 +508,37 @@ export default function Shell({ children }: { children?: React.ReactNode }) {
                       key={agent.id}
                       className={`pw-agent-card ${active ? 'is-active' : ''} ${expanded ? 'is-expanded' : ''}`}
                     >
-                      <button
-                        className="pw-agent-button"
-                        onClick={() => toggleAgentExpanded(agent.id)}
-                      >
-                        <div className="pw-agent-avatar">{agent.name.slice(0, 1)}</div>
-                        <div className="pw-agent-copy">
-                          <div className="pw-agent-topline">
-                            <span className="pw-agent-name">{agent.name}</span>
-                            <span className={`pw-badge ${statusLabelTone[agent.status] || 'tone-muted'}`}>
-                              {agent.status}
-                            </span>
-                          </div>
-                          <div className="pw-agent-subline">
-                            {agent.capabilities.join(' · ') || 'No capability metadata'}
+                      <div className="pw-agent-button" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px' }}>
+                        <div 
+                          style={{ display: 'flex', alignItems: 'center', flex: 1, cursor: 'pointer', minWidth: 0 }}
+                          onClick={() => toggleAgentExpanded(agent.id)}
+                        >
+                          <div className="pw-agent-avatar" style={{ width: 24, height: 24, fontSize: 12 }}>{agent.name.slice(0, 1)}</div>
+                          <div className="pw-agent-copy" style={{ marginLeft: 8, minWidth: 0, overflow: 'hidden' }}>
+                            <div className="pw-agent-topline" style={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>
+                              <span className="pw-agent-name" style={{ fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{agent.name}</span>
+                              <span className={`pw-presence-dot`} style={{ marginLeft: 6, width: 8, height: 8, borderRadius: '50%', display: 'inline-block', backgroundColor: agent.status === 'online' ? '#4ade80' : '#fbbf24' }}></span>
+                            </div>
                           </div>
                         </div>
-                        <span className={`pw-disclosure ${expanded ? 'is-open' : ''}`} aria-hidden="true">
-                          ▾
-                        </span>
-                      </button>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <button 
+                            className="pw-icon-button"
+                            onClick={(e) => { e.stopPropagation(); handleCreateSession(agent.id) }}
+                            title="New Session"
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', opacity: 0.6 }}
+                          >
+                            ➕
+                          </button>
+                        </div>
+                      </div>
 
                       {expanded && (
                         <div className="pw-session-tree">
                           <div className="pw-session-tree-label">Sessions</div>
-                          {loadingSessions && <div className="pw-empty-state small">Loading sessions...</div>}
+                          {loadingSessions && <div className="pw-empty-state small">⏳ Loading sessions...</div>}
                           {!loadingSessions && regularSessions.length === 0 && channelGroups.length === 0 && (
-                            <div className="pw-empty-state small">No sessions for this agent.</div>
+                            <div className="pw-empty-state small">∅ No sessions</div>
                           )}
                           {regularSessions.map((session) => (
                             <button
@@ -525,8 +546,8 @@ export default function Shell({ children }: { children?: React.ReactNode }) {
                               className={`pw-session-button ${session.id === currentSessionId ? 'is-active' : ''}`}
                               onClick={() => handleSelectSession(agent.id, session.id)}
                             >
-                              <div className="pw-session-title-row">
-                                <span className="pw-session-title">{session.name}</span>
+                              <div className="pw-session-title-row" style={{ minWidth: 0 }}>
+                                <span className="pw-session-title" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'inline-block', maxWidth: '80%' }}>{session.name}</span>
                                 <span className="pw-session-time">
                                   {session.updated || formatRelativeTime(session.updatedAt) || '--'}
                                 </span>

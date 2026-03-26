@@ -20,7 +20,7 @@ type StructuredDisplay = {
   text: string
 }
 
-const TOOL_PREVIEW_LIMIT = 120
+const TOOL_PREVIEW_LIMIT = 80
 
 function collapseWhitespace(value: string): string {
   return value.replace(/\s+/g, ' ').trim()

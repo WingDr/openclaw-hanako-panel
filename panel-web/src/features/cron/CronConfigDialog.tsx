@@ -255,7 +255,7 @@ export function CronConfigDialog(props: CronConfigDialogProps) {
             }}>
               JSON
             </button>
-            <button className="pw-secondary-button" type="button" onClick={onClose}>Close</button>
+            <button className="pw-secondary-button" type="button" onClick={onClose}>❌</button>
           </div>
         </header>
 

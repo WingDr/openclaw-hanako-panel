@@ -16,12 +16,12 @@
   --bad: #b66350;
   --shadow: 0 24px 60px rgba(88, 58, 24, 0.08);
   --chat-bubble-max-width: 1080px;
-  --pw-left-panel-size: 320px;
-  --pw-right-panel-size: 280px;
+  --pw-left-panel-size: 240px;
+  --pw-right-panel-size: 240px;
   --pw-panel-splitter-size: 32px;
-  --radius-sm: 10px;
-  --radius-md: 18px;
-  --radius-lg: 28px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
   --font-ui: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
   --font-display: 'Iowan Old Style', 'Baskerville', 'Songti SC', 'STSong', serif;
 }
@@ -80,9 +80,9 @@ button {
 .pw-chat-surface,
 .pw-manage-card,
 .pw-summary-card {
-  background: linear-gradient(180deg, rgba(255, 250, 243, 0.98), rgba(245, 235, 223, 0.92));
-  border: 1px solid var(--line);
-  box-shadow: var(--shadow);
+  background: var(--paper-strong);
+  border: 1px solid var(--line-strong);
+  box-shadow: none;
 }
 
 .pw-sidebar {
@@ -91,7 +91,7 @@ button {
   width: 100%;
   height: 100%;
   min-height: 0;
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   padding: 18px;
 }
 
@@ -136,7 +136,7 @@ button {
   width: 1px;
   height: calc(100% - 10px);
   border-radius: 999px;
-  background: linear-gradient(180deg, transparent, var(--line-strong), transparent);
+  background: var(--paper-strong);
 }
 
 .pw-panel-splitter-controls {
@@ -155,7 +155,7 @@ button {
   justify-content: center;
   width: 24px;
   min-width: 24px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   background: rgba(255, 250, 243, 0.92);
   color: var(--accent-strong);
   box-shadow: 0 10px 26px rgba(88, 58, 24, 0.12);
@@ -178,7 +178,7 @@ button {
 
 .pw-panel-resize {
   height: 42px;
-  border-radius: 14px;
+  border-radius: 8px;
   font-size: 1rem;
   cursor: col-resize;
   touch-action: none;
@@ -222,7 +222,7 @@ button {
 .pw-sidebar-meta {
   margin-top: 16px;
   padding: 12px 14px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   border-radius: var(--radius-md);
   background: rgba(255, 255, 255, 0.35);
   font-size: 0.84rem;
@@ -374,7 +374,7 @@ button {
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  background: linear-gradient(135deg, #b47d53, #e7c8a0);
+  background: var(--paper-strong);
   color: #fffaf2;
   font-family: var(--font-display);
   font-size: 1.05rem;
@@ -478,7 +478,7 @@ button {
   justify-content: space-between;
   gap: 10px;
   padding: 10px 12px;
-  border-radius: 12px;
+  border-radius: 8px;
   border: 1px solid rgba(101, 76, 48, 0.08);
   background: rgba(255, 255, 255, 0.24);
   color: var(--muted);
@@ -507,7 +507,7 @@ button {
 
 .pw-session-button {
   padding: 10px 12px;
-  border-radius: 12px;
+  border-radius: 8px;
   background: rgba(255, 255, 255, 0.42);
   border: 1px solid transparent;
   transition: background 0.18s ease, border-color 0.18s ease;
@@ -535,7 +535,7 @@ button {
 .pw-info-banner,
 .pw-inline-note {
   margin-top: 14px;
-  border-radius: 14px;
+  border-radius: 8px;
   padding: 12px 14px;
   font-size: 0.9rem;
   line-height: 1.5;
@@ -593,7 +593,7 @@ button {
   gap: 6px;
   padding: 6px;
   border-radius: 999px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   background: rgba(255, 255, 255, 0.45);
 }
 
@@ -636,7 +636,7 @@ button {
 
 .pw-main-surface {
   min-height: 0;
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   padding: 24px;
   overflow: auto;
 }
@@ -669,11 +669,11 @@ button {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
   gap: 12px;
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   padding: 18px;
-  background: linear-gradient(180deg, rgba(255, 250, 243, 0.98), rgba(245, 235, 223, 0.92));
-  border: 1px solid var(--line);
-  box-shadow: var(--shadow);
+  background: var(--paper-strong);
+  border: 1px solid var(--line-strong);
+  box-shadow: none;
 }
 
 .pw-right-rail-panel-header {
@@ -729,7 +729,7 @@ button {
 }
 
 .pw-tree-shell .rct-tree-item-button {
-  border-radius: 12px;
+  border-radius: 8px;
 }
 
 .pw-tree-shell .rct-tree-item-button:hover {
@@ -745,8 +745,8 @@ button {
 .pw-auth-input,
 .pw-rail-textarea {
   width: 100%;
-  border-radius: 14px;
-  border: 1px solid var(--line);
+  border-radius: 8px;
+  border: 1px solid var(--line-strong);
   background: rgba(255, 255, 255, 0.64);
   color: var(--text);
   padding: 10px 12px;
@@ -767,8 +767,8 @@ button {
 .pw-rail-list-row,
 .pw-rail-card {
   width: 100%;
-  border: 1px solid var(--line);
-  border-radius: 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
   background: rgba(255, 255, 255, 0.44);
   color: var(--text);
 }
@@ -846,9 +846,9 @@ button {
   grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 14px;
   padding: 18px;
-  border-radius: 24px;
-  background: linear-gradient(180deg, rgba(255, 250, 243, 0.99), rgba(245, 235, 223, 0.96));
-  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper-strong);
+  border: 1px solid var(--line-strong);
   box-shadow: 0 30px 70px rgba(50, 33, 15, 0.18);
 }
 
@@ -876,8 +876,8 @@ button {
 .pw-editor-shell,
 .pw-json-editor-shell {
   overflow: hidden;
-  border-radius: 18px;
-  border: 1px solid var(--line);
+  border-radius: 10px;
+  border: 1px solid var(--line-strong);
 }
 
 .pw-editor-shell {
@@ -1022,7 +1022,7 @@ button {
   color: var(--muted);
   background: rgba(255, 255, 255, 0.28);
   border: 1px dashed rgba(101, 76, 48, 0.18);
-  border-radius: 18px;
+  border-radius: 10px;
 }
 
 .pw-empty-state.small {
@@ -1039,7 +1039,7 @@ button {
 }
 
 .pw-primary-button {
-  background: linear-gradient(135deg, #a76c43, #b98458);
+  background: var(--paper-strong);
   color: #fffaf5;
 }
 
@@ -1099,7 +1099,7 @@ button {
   gap: 10px;
   padding: 8px 12px;
   border-radius: 999px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   background: rgba(255, 255, 255, 0.32);
   color: var(--muted);
   font-size: 0.9rem;
@@ -1161,9 +1161,9 @@ button {
   min-width: 0;
   flex-direction: column;
   gap: 10px;
-  border-radius: 18px;
+  border-radius: 10px;
   padding: 12px 14px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   box-shadow: 0 8px 24px rgba(88, 58, 24, 0.04);
 }
 
@@ -1303,7 +1303,7 @@ button {
   margin: 0;
   padding: 12px 14px;
   overflow: auto;
-  border-radius: 14px;
+  border-radius: 8px;
   border: 1px solid rgba(101, 76, 48, 0.1);
   background: rgba(255, 255, 255, 0.46);
 }
@@ -1343,7 +1343,7 @@ button {
 
 .pw-markdown img {
   max-width: 100%;
-  border-radius: 12px;
+  border-radius: 8px;
 }
 
 .pw-tool-details {
@@ -1473,7 +1473,7 @@ button {
   flex-direction: column;
   gap: 10px;
   padding: 12px;
-  border-radius: 14px;
+  border-radius: 8px;
   border: 1px solid rgba(101, 76, 48, 0.1);
   background: rgba(255, 255, 255, 0.62);
 }
@@ -1513,7 +1513,7 @@ button {
 .pw-tool-text-block {
   margin: 0;
   padding: 10px 12px;
-  border-radius: 12px;
+  border-radius: 8px;
   border: 1px solid rgba(101, 76, 48, 0.08);
   background: rgba(255, 255, 255, 0.52);
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
@@ -1543,7 +1543,7 @@ button {
 .pw-structured-grid.is-array,
 .pw-structured-grid.is-nested {
   padding: 10px 12px;
-  border-radius: 12px;
+  border-radius: 8px;
   border: 1px solid rgba(101, 76, 48, 0.08);
   background: rgba(255, 255, 255, 0.48);
 }
@@ -1580,7 +1580,7 @@ button {
   flex-direction: column;
   gap: 12px;
   padding: 14px 16px 14px 18px;
-  border-radius: 28px;
+  border-radius: 12px;
   border: 1px solid transparent;
   background: rgba(255, 255, 255, 0.34);
   box-shadow: none;
@@ -1661,7 +1661,7 @@ button {
 
 .pw-log-search {
   width: 100%;
-  border-radius: 16px;
+  border-radius: 8px;
   border: 1px solid rgba(101, 76, 48, 0.18);
   background: rgba(255, 255, 255, 0.7);
   padding: 13px 15px;
@@ -1684,7 +1684,7 @@ button {
 
 .pw-list-row {
   padding: 10px 12px;
-  border-radius: 14px;
+  border-radius: 8px;
   background: rgba(255, 255, 255, 0.42);
   border: 1px solid rgba(101, 76, 48, 0.08);
 }
@@ -1707,7 +1707,7 @@ button {
   gap: 8px;
   padding: 6px;
   border-radius: 999px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   background: rgba(255, 255, 255, 0.45);
 }
 
@@ -1739,7 +1739,7 @@ button {
 }
 
 .pw-summary-card {
-  border-radius: 20px;
+  border-radius: 10px;
   padding: 18px;
 }
 
@@ -1754,7 +1754,7 @@ button {
   width: 100%;
   min-height: 0;
   flex-direction: column;
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   padding: 18px;
   gap: 14px;
 }
@@ -1773,7 +1773,7 @@ button {
   flex-direction: column;
   gap: 10px;
   padding: 14px;
-  border-radius: 16px;
+  border-radius: 8px;
   background: rgba(255, 255, 255, 0.42);
   border: 1px solid rgba(101, 76, 48, 0.08);
 }
@@ -1801,7 +1801,7 @@ button {
 .pw-log-line {
   align-items: flex-start;
   padding: 12px 14px;
-  border-radius: 14px;
+  border-radius: 8px;
   background: rgba(255, 255, 255, 0.42);
   border: 1px solid rgba(101, 76, 48, 0.08);
 }
@@ -1967,11 +1967,11 @@ button {
   display: grid;
   gap: 20px;
   padding: 34px 34px 30px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
   background:
     linear-gradient(180deg, rgba(255, 250, 243, 0.98), rgba(245, 235, 223, 0.92));
-  box-shadow: var(--shadow);
+  box-shadow: none;
 }
 
 .pw-auth-header {
@@ -2009,7 +2009,7 @@ button {
   min-height: 52px;
   padding: 14px 16px;
   border: 1px solid var(--line-strong);
-  border-radius: 16px;
+  border-radius: 8px;
   background: rgba(255, 255, 255, 0.62);
   color: var(--text);
   font: inherit;
@@ -2047,7 +2047,7 @@ button {
 
   .pw-auth-card {
     padding: 26px 22px 22px;
-    border-radius: 24px;
+    border-radius: 12px;
   }
 
   .pw-auth-card h1 {
@@ -2057,4 +2057,235 @@ button {
   .pw-auth-actions .pw-primary-button {
     width: 100%;
   }
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(101, 76, 48, 0.2);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(101, 76, 48, 0.4);
+}
+
+/* ====== FLAT & DENSE OVERRIDES ====== */
+
+/* Remove card appearance globally */
+.pw-sidebar,
+.pw-main-surface,
+.pw-right-rail-card,
+.pw-chat-surface,
+.pw-manage-card,
+.pw-summary-card {
+  box-shadow: none !important;
+  border: none !important;
+  border-radius: 8px !important;
+  background: transparent !important;
+}
+
+/* Chat Bubbles: Remove balloons, make them flat inline blocks */
+.pw-message-bubble {
+  border: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  padding: 4px 0 !important;
+  border-radius: 8px !important;
+}
+
+.pw-message-bubble.is-user {
+  background: transparent !important;
+  border-left: 3px solid rgba(167, 108, 67, 0.4) !important;
+  padding-left: 12px !important;
+}
+
+.pw-message-bubble.is-agent, .pw-message-bubble.is-system {
+  background: transparent !important;
+}
+
+.pw-message-row {
+  margin-bottom: 12px !important;
+}
+
+.pw-message-row.is-agent {
+  margin-bottom: 4px !important;
+}
+
+.pw-message-author {
+  font-size: 0.9em !important;
+  color: var(--accent-strong) !important;
+}
+
+/* Tool Calls: Ultra Dense and flat */
+.pw-tool-card {
+  background: rgba(101, 76, 48, 0.04) !important;
+  border: 1px solid rgba(101, 76, 48, 0.1) !important;
+  border-radius: 8px !important;
+  padding: 0 !important;
+  margin: 4px 0 !important;
+  box-shadow: none !important;
+}
+
+.pw-tool-summary {
+  padding: 4px 8px !important;
+  font-family: var(--font-ui) !important;
+  font-size: 0.85rem !important;
+  gap: 6px !important;
+}
+
+.pw-tool-summary-main {
+  gap: 6px !important;
+}
+
+.pw-tool-status-pill {
+  padding: 2px 4px !important;
+  font-size: 0.7rem !important;
+  background: transparent !important;
+  border: none !important;
+}
+
+.pw-tool-summary-name {
+  font-family: monospace !important;
+  font-size: 0.85rem !important;
+  background: rgba(101, 76, 48, 0.08) !important;
+  color: var(--text) !important;
+  padding: 2px 6px !important;
+  border-radius: 8px !important;
+}
+
+.pw-tool-body {
+  padding: 4px 8px 8px !important;
+  gap: 6px !important;
+}
+
+.pw-tool-section {
+  border: none !important;
+  background: rgba(255, 255, 255, 0.3) !important;
+  border-radius: 8px !important;
+  padding: 6px 8px !important;
+  font-size: 0.85rem !important;
+}
+
+/* Agent List: Flatten */
+.pw-agent-card {
+  box-shadow: none !important;
+  border: none !important;
+  background: transparent !important;
+  padding: 0 !important;
+  margin-bottom: 2px !important;
+}
+
+/* Sessions: Remove button borders */
+.pw-session-button {
+  background: transparent !important;
+  border: none !important;
+  border-left: 2px solid transparent !important;
+  border-radius: 8px !important;
+  padding: 6px 8px 6px 12px !important;
+  box-shadow: none !important;
+}
+
+.pw-session-button.is-active {
+  border-left-color: var(--accent) !important;
+  background: var(--accent-soft) !important;
+}
+
+/* Fix flex child truncation */
+.pw-agent-name, .pw-session-title {
+  display: block;
+}
+
+
+/* Additional Truncation & Layout fixes */
+.pw-agent-topline {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+.pw-agent-copy {
+  min-width: 0;
+}
+
+.pw-session-title-row {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+.pw-chat-presence span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Input Shell Prominent Card */
+.pw-input-shell {
+  border-radius: 24px !important;
+  border: 1px solid rgba(167, 108, 67, 0.1) !important;
+  background: rgba(255, 255, 255, 0.45) !important;
+  backdrop-filter: blur(8px) !important;
+  -webkit-backdrop-filter: blur(8px) !important;
+  box-shadow: 0 4px 16px rgba(101, 76, 48, 0.05), 0 2px 4px rgba(101, 76, 48, 0.02) !important;
+  padding: 12px 20px !important;
+  margin: 0 auto 12px !important;
+  width: 96% !important;
+  max-width: var(--chat-bubble-max-width) !important;
+}
+
+.pw-input-textarea-shell textarea {
+  background: transparent !important;
+}
+
+/* Flatten Markdown Pre */
+.pw-markdown-pre {
+  padding: 8px 10px !important;
+  border-radius: 8px !important;
+  background: var(--paper-muted) !important;
+  border: 1px solid var(--line-strong) !important;
+  font-size: 0.85em !important;
+}
+
+/* Tool Details Default Hide Empty Border */
+.pw-tool-details[open] {
+  border-top: 1px solid var(--line-strong) !important;
+  background: var(--paper-muted) !important;
+}
+
+/* Further compress tool card padding and gap */
+.pw-tool-card {
+  margin: 1px 0 !important;
+}
+
+.pw-message-stream {
+  gap: 0 !important;  /* override if parent sets flex gap */
+}
+
+/* Ensure padding of text messages isn't completely zero if we squeezed them too hard */
+.pw-message-bubble.is-user {
+  margin: 8px 0 16px 0 !important;
+}
+
+.pw-message-bubble.is-system {
+  margin-bottom: 8px !important;
+}
+
+
+/* Move input box closer to bottom */
+.pw-input-shell {
+  margin: 0 auto 0 !important;
+}
+.pw-chat-surface {
+  padding-bottom: 8px !important;
+}
+
+/* Redefine borders & min-widths in panels */
+.pw-app-shell {
+  padding: 8px !important;
 }
