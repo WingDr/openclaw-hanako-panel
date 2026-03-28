@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react'
+import { LogIn, RefreshCw } from 'lucide-react'
 import { fetchAuthStatus, loginPanel, type AuthStatus } from '../api/client'
+import { IconButton } from '../components/IconButton'
 import { panelRealtime } from '../realtime/ws'
 import { subscribeAuthRequired } from './events'
 
@@ -95,9 +97,12 @@ export function AuthGate({ children }: AuthGateProps) {
             <h1>Unable to reach panel-proxy</h1>
             <p className="pw-auth-copy">{error || 'Failed to load proxy auth status.'}</p>
           </div>
-          <button className="pw-primary-button" type="button" onClick={() => void refreshStatus()}>
-            Retry
-          </button>
+          <IconButton
+            className="pw-primary-button"
+            icon={RefreshCw}
+            label="Retry"
+            onClick={() => void refreshStatus()}
+          />
         </div>
       </div>
     )
@@ -156,9 +161,14 @@ export function AuthGate({ children }: AuthGateProps) {
         </label>
         {error && <div className="pw-inline-note">{error}</div>}
         <div className="pw-auth-actions">
-          <button className="pw-primary-button" type="submit" disabled={pending || !password.trim()}>
-            {pending ? 'Signing in...' : 'Enter panel'}
-          </button>
+          <IconButton
+            className="pw-primary-button"
+            type="submit"
+            icon={LogIn}
+            label={pending ? 'Signing in to panel' : 'Enter panel'}
+            disabled={pending || !password.trim()}
+            spin={pending}
+          />
         </div>
       </form>
     </div>

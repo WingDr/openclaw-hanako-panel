@@ -2,7 +2,9 @@ import React, { useEffect, useMemo, useState } from 'react'
 import CodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror'
 import type { Extension } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
+import { MessageSquarePlus, Save, X } from 'lucide-react'
 import { WorkspaceFileDocument } from '../../api/client'
+import { IconButton } from '../../components/IconButton'
 
 type WorkspaceEditorDialogProps = {
   open: boolean
@@ -196,9 +198,12 @@ export function WorkspaceEditorDialog(props: WorkspaceEditorDialogProps) {
               Agent <strong>{agentId || 'unknown'}</strong> · {document.size} bytes · {sessionKey ? 'ready for chat injection' : 'no session selected'}
             </p>
           </div>
-          <button className="pw-secondary-button" type="button" onClick={onClose}>
-            Close
-          </button>
+          <IconButton
+            className="pw-secondary-button"
+            icon={X}
+            label="Close"
+            onClick={onClose}
+          />
         </header>
 
         <div className="pw-editor-shell">
@@ -245,12 +250,22 @@ export function WorkspaceEditorDialog(props: WorkspaceEditorDialogProps) {
               : 'No selection. Inject will use the whole file.'}
           </div>
           <div className="pw-modal-actions">
-            <button className="pw-secondary-button" type="button" onClick={() => void handleInjectSelected()} disabled={!sessionKey || pendingInject}>
-              {pendingInject ? 'Injecting...' : 'Add to chat'}
-            </button>
-            <button className="pw-primary-button" type="button" onClick={() => void handleSave()} disabled={pendingSave}>
-              {pendingSave ? 'Saving...' : 'Save file'}
-            </button>
+            <IconButton
+              className="pw-secondary-button"
+              icon={MessageSquarePlus}
+              label={pendingInject ? 'Injecting workspace content into chat' : 'Add to chat'}
+              onClick={() => void handleInjectSelected()}
+              disabled={!sessionKey || pendingInject}
+              spin={pendingInject}
+            />
+            <IconButton
+              className="pw-primary-button"
+              icon={Save}
+              label={pendingSave ? 'Saving file' : 'Save file'}
+              onClick={() => void handleSave()}
+              disabled={pendingSave}
+              spin={pendingSave}
+            />
           </div>
         </footer>
       </div>

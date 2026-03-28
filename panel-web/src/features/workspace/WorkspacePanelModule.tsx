@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
+import { FilePenLine, MessageSquarePlus, RefreshCw } from 'lucide-react'
 import {
   ControlledTreeEnvironment,
   Tree,
@@ -12,6 +13,7 @@ import {
   type WorkspaceFileDocument,
   type WorkspaceTreeNode,
 } from '../../api/client'
+import { IconButton } from '../../components/IconButton'
 import { panelRealtime } from '../../realtime/ws'
 import { useChatStore } from '../../store'
 import { WorkspaceEditorDialog } from './WorkspaceEditorDialog'
@@ -193,9 +195,13 @@ export function WorkspacePanelModule(props: WorkspacePanelModuleProps) {
           <p className="pw-section-kicker">Workspace</p>
           <h2>{workspaceName}</h2>
         </div>
-        <button className="pw-secondary-button" type="button" onClick={() => setRefreshToken((value) => value + 1)}>
-          Refresh
-        </button>
+        <IconButton
+          className="pw-secondary-button"
+          icon={RefreshCw}
+          label="Refresh workspace"
+          onClick={() => setRefreshToken((value) => value + 1)}
+          spin={loading}
+        />
       </header>
 
       <div className="pw-right-rail-toolbar">
@@ -258,24 +264,22 @@ export function WorkspacePanelModule(props: WorkspacePanelModuleProps) {
 
       <footer className="pw-right-rail-footer is-actions-only">
         <div className="pw-right-rail-actions">
-          <button
+          <IconButton
             className="pw-secondary-button"
-            type="button"
+            icon={MessageSquarePlus}
+            label="Add to chat"
             data-testid="workspace-add-to-chat"
             onClick={() => void injectSelectedFile()}
             disabled={!selectedNode || selectedNode.kind !== 'file' || !sessionKey}
-          >
-            Add to chat
-          </button>
-          <button
+          />
+          <IconButton
             className="pw-primary-button"
-            type="button"
+            icon={FilePenLine}
+            label="Open file"
             data-testid="workspace-open-file"
             onClick={() => void openSelectedFile()}
             disabled={!selectedNode || selectedNode.kind !== 'file'}
-          >
-            Open file
-          </button>
+          />
         </div>
       </footer>
 

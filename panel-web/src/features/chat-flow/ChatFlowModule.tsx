@@ -1,4 +1,5 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { MessageSquarePlus, Paperclip, SendHorizontal, Square, Wrench } from 'lucide-react'
 import {
   mapProxyChatHistoryMessage,
   type AgentSummary,
@@ -14,6 +15,7 @@ import {
 } from './ChatFlowMessageParts'
 import { ChatFlowConnectionLayer, type SyncBootstrapResult } from './runtime/ChatFlowConnectionLayer'
 import { applyChatFlowEvent } from './runtime/applyChatFlowEvent'
+import { IconButton } from '../../components/IconButton'
 import { useChatStore, type PendingComposerMessage, type ToolInvocationCard } from '../../store'
 
 type ChatFlowModuleProps = {
@@ -414,49 +416,43 @@ export function ChatFlowModule(props: ChatFlowModuleProps) {
         </div>
         <div className="pw-input-toolbar">
           <div className="pw-input-toolset">
-            <button
-              className="pw-tool-toggle-button is-icon"
-              type="button"
-              onClick={() => undefined}
-              aria-label="Insert attachment"
-            >
-              +
-            </button>
-            <button
+            <IconButton
               className="pw-tool-toggle-button"
-              type="button"
+              icon={MessageSquarePlus}
+              label="Insert attachment"
               onClick={() => undefined}
-            >
-              Attach
-            </button>
-            <button
+            />
+            <IconButton
               className="pw-tool-toggle-button"
-              type="button"
+              icon={Paperclip}
+              label="Attach"
               onClick={() => undefined}
-            >
-              Tools
-            </button>
+            />
+            <IconButton
+              className="pw-tool-toggle-button"
+              icon={Wrench}
+              label="Tools"
+              onClick={() => undefined}
+            />
           </div>
           <div className="pw-input-actions">
             {canAbort ? (
-              <button
+              <IconButton
                 className="pw-primary-button"
+                icon={Square}
+                label="Stop"
                 onClick={() => void onAbort()}
                 disabled={sendPending}
-                type="button"
-              >
-                Stop
-              </button>
+              />
             ) : null}
             {!canAbort ? (
-              <button
+              <IconButton
                 className="pw-primary-button"
+                icon={SendHorizontal}
+                label="Send"
                 onClick={() => void onSend()}
                 disabled={!currentSessionId || sendPending || currentAgentOffline || currentBusy}
-                type="button"
-              >
-                Send
-              </button>
+              />
             ) : null}
           </div>
         </div>

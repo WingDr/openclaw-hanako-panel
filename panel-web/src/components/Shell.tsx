@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef } from 'react'
+import { GripVertical, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Plus } from 'lucide-react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { fetchAgents, fetchBootstrap, fetchSessions, formatRelativeTime, type ChatSession } from '../api/client'
+import { IconButton } from './IconButton'
 import { RightRailModulesHost } from '../features/rail/RightRailModulesHost'
 import { useChatStore } from '../store'
 import { panelRealtime } from '../realtime/ws'
@@ -522,14 +524,13 @@ export default function Shell({ children }: { children?: React.ReactNode }) {
                           </div>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                          <button 
+                          <IconButton
                             className="pw-icon-button"
+                            icon={Plus}
+                            label="New session"
                             onClick={(e) => { e.stopPropagation(); handleCreateSession(agent.id) }}
-                            title="New Session"
                             style={{ background: 'none', border: 'none', cursor: 'pointer', opacity: 0.6 }}
-                          >
-                            ➕
-                          </button>
+                          />
                         </div>
                       </div>
 
@@ -631,25 +632,21 @@ export default function Shell({ children }: { children?: React.ReactNode }) {
 
           <div className="pw-panel-splitter pw-panel-splitter-left">
             <div className="pw-panel-splitter-controls">
-              <button
-                type="button"
+              <IconButton
                 className="pw-panel-toggle"
+                icon={leftPanelOpen ? PanelLeftClose : PanelLeftOpen}
+                label={leftPanelOpen ? 'Close left panel' : 'Open left panel'}
                 onClick={() => togglePanel('left')}
-                aria-label={leftPanelOpen ? 'Close left panel' : 'Open left panel'}
-                title={leftPanelOpen ? 'Close left panel' : 'Open left panel'}
-              >
-                {leftPanelOpen ? '‹' : '›'}
-              </button>
+                size={16}
+              />
               {leftPanelOpen && (
-                <button
-                  type="button"
+                <IconButton
                   className="pw-panel-resize"
+                  icon={GripVertical}
+                  label="Resize left panel"
                   onPointerDown={beginResize('left')}
-                  aria-label="Resize left panel"
-                  title="Resize left panel"
-                >
-                  ⋮
-                </button>
+                  size={16}
+                />
               )}
             </div>
           </div>
@@ -688,25 +685,21 @@ export default function Shell({ children }: { children?: React.ReactNode }) {
         <>
           <div className="pw-panel-splitter pw-panel-splitter-right">
             <div className="pw-panel-splitter-controls">
-              <button
-                type="button"
+              <IconButton
                 className="pw-panel-toggle"
+                icon={rightPanelOpen ? PanelRightClose : PanelRightOpen}
+                label={rightPanelOpen ? 'Close right panel' : 'Open right panel'}
                 onClick={() => togglePanel('right')}
-                aria-label={rightPanelOpen ? 'Close right panel' : 'Open right panel'}
-                title={rightPanelOpen ? 'Close right panel' : 'Open right panel'}
-              >
-                {rightPanelOpen ? '›' : '‹'}
-              </button>
+                size={16}
+              />
               {rightPanelOpen && (
-                <button
-                  type="button"
+                <IconButton
                   className="pw-panel-resize"
+                  icon={GripVertical}
+                  label="Resize right panel"
                   onPointerDown={beginResize('right')}
-                  aria-label="Resize right panel"
-                  title="Resize right panel"
-                >
-                  ⋮
-                </button>
+                  size={16}
+                />
               )}
             </div>
           </div>

@@ -1,4 +1,6 @@
 import React from 'react'
+import { ArrowDownToLine, Eraser } from 'lucide-react'
+import { IconButton } from '../../components/IconButton'
 import type { RealtimeLogsController } from './useRealtimeLogs'
 
 type LogsStreamModuleProps = {
@@ -33,22 +35,22 @@ export function LogsStreamModule(props: LogsStreamModuleProps) {
             placeholder="Search logs"
             style={{ padding: '8px 10px', borderRadius: 6, border: '1px solid var(--border)', minWidth: 220 }}
           />
-          <button
+          <IconButton
+            className="pw-secondary-button"
+            icon={Eraser}
+            label="Clear"
             onClick={() => setSearch('')}
-            style={{ padding: '8px 12px', borderRadius: 6, border: 'none', background: '#1f2a44', color: 'white' }}
-          >
-            Clear
-          </button>
+          />
           {!autoFollow && (
-            <button
+            <IconButton
+              className="pw-secondary-button"
+              icon={ArrowDownToLine}
+              label="Jump to latest"
               onClick={() => {
                 setAutoFollow(true)
                 scrollToBottom()
               }}
-              style={{ padding: '8px 12px', borderRadius: 6, border: '1px solid var(--border)', background: 'rgba(255,255,255,0.06)', color: 'white' }}
-            >
-              Jump to latest
-            </button>
+            />
           )}
           <div style={{ marginLeft: 'auto', color: live ? '#4ade80' : '#fca5a5', fontSize: 12 }}>
             {live ? (autoFollow ? 'Live stream following' : 'Live stream paused') : 'Snapshot only'}
@@ -89,19 +91,17 @@ export function LogsStreamModule(props: LogsStreamModuleProps) {
           onChange={(event) => setSearch(event.target.value)}
           placeholder="Filter log lines"
         />
-        <button className="pw-secondary-button" onClick={() => setSearch('')}>
-          Clear
-        </button>
+        <IconButton className="pw-secondary-button" icon={Eraser} label="Clear" onClick={() => setSearch('')} />
         {!autoFollow && (
-          <button
+          <IconButton
             className="pw-secondary-button"
+            icon={ArrowDownToLine}
+            label="Jump to latest"
             onClick={() => {
               setAutoFollow(true)
               scrollToBottom()
             }}
-          >
-            Jump to latest
-          </button>
+          />
         )}
       </div>
 

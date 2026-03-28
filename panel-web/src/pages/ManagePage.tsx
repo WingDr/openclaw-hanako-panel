@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react'
+import { Activity, ScrollText } from 'lucide-react'
 import { fetchStatus, formatClockTime, formatRelativeTime, type StatusSnapshot } from '../api/client'
+import { IconButton } from '../components/IconButton'
 import { LogsStreamModule } from '../features/logs/LogsStreamModule'
 import { useRealtimeLogs } from '../features/logs/useRealtimeLogs'
 
@@ -109,18 +111,20 @@ export default function ManagePage() {
       </section>
 
       <section className="pw-manage-view-switcher" aria-label="Manage sections">
-        <button
+        <IconButton
           className={`pw-subtab-button ${activeManageView === 'status' ? 'is-active' : ''}`}
+          icon={Activity}
+          label="Gateway and workspace snapshot"
+          aria-pressed={activeManageView === 'status'}
           onClick={() => setActiveManageView('status')}
-        >
-          Gateway and workspace snapshot
-        </button>
-        <button
+        />
+        <IconButton
           className={`pw-subtab-button ${activeManageView === 'logs' ? 'is-active' : ''}`}
+          icon={ScrollText}
+          label="Realtime proxy stream"
+          aria-pressed={activeManageView === 'logs'}
           onClick={() => setActiveManageView('logs')}
-        >
-          Realtime proxy stream
-        </button>
+        />
       </section>
 
       <section className="pw-manage-view">

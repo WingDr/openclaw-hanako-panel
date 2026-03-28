@@ -1035,7 +1035,52 @@ button {
   border-radius: 999px;
   padding: 10px 16px;
   border: 1px solid transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   transition: transform 0.18s ease, background 0.18s ease, border-color 0.18s ease;
+}
+
+.pw-icon-only-button {
+  padding: 0;
+  gap: 0;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.pw-button-icon {
+  display: block;
+  flex-shrink: 0;
+}
+
+.pw-button-icon.is-spinning {
+  animation: pw-button-spin 0.9s linear infinite;
+}
+
+.pw-primary-button.pw-icon-only-button,
+.pw-secondary-button.pw-icon-only-button,
+.pw-tool-toggle-button.pw-icon-only-button,
+.pw-subtab-button.pw-icon-only-button {
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+}
+
+.pw-subtab-button.pw-icon-only-button {
+  width: 42px;
+  min-width: 42px;
+  height: 42px;
+}
+
+.pw-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  color: inherit;
 }
 
 .pw-primary-button {
@@ -1640,6 +1685,9 @@ button {
 .pw-tool-toggle-button {
   border: none;
   border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: rgba(255, 255, 255, 0.38);
   color: var(--muted);
   padding: 8px 12px;
@@ -2040,6 +2088,10 @@ button {
   min-width: 148px;
 }
 
+.pw-auth-actions .pw-primary-button.pw-icon-only-button {
+  min-width: 52px;
+}
+
 @media (max-width: 640px) {
   .pw-auth-screen {
     padding: 18px;
@@ -2056,6 +2108,20 @@ button {
 
   .pw-auth-actions .pw-primary-button {
     width: 100%;
+  }
+
+  .pw-auth-actions .pw-primary-button.pw-icon-only-button {
+    width: 52px;
+  }
+}
+
+@keyframes pw-button-spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
   }
 }
 

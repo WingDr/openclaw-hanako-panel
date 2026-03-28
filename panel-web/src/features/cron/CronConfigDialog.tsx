@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import CodeMirror from '@uiw/react-codemirror'
 import { json } from '@codemirror/lang-json'
+import { Braces, Save, SlidersHorizontal, ToggleLeft, ToggleRight, Trash2, X } from 'lucide-react'
 import {
   createCronDefinition,
   deleteCronDefinition,
@@ -9,6 +10,7 @@ import {
   validateCronDefinition,
   type CronJobSummary,
 } from '../../api/client'
+import { IconButton } from '../../components/IconButton'
 
 type CronConfigDialogProps = {
   open: boolean
@@ -242,20 +244,35 @@ export function CronConfigDialog(props: CronConfigDialogProps) {
             </p>
           </div>
           <div className="pw-modal-actions">
-            <button className={`pw-secondary-button ${formMode === 'structured' ? 'is-selected' : ''}`} type="button" data-testid="cron-mode-structured" onClick={() => {
-              setFormMode('structured')
-              setError(null)
-            }}>
-              Structured
-            </button>
-            <button className={`pw-secondary-button ${formMode === 'json' ? 'is-selected' : ''}`} type="button" data-testid="cron-mode-json" onClick={() => {
-              setJsonValue(structuredPreview)
-              setFormMode('json')
-              setError(null)
-            }}>
-              JSON
-            </button>
-            <button className="pw-secondary-button" type="button" onClick={onClose}>❌</button>
+            <IconButton
+              className={`pw-secondary-button ${formMode === 'structured' ? 'is-selected' : ''}`}
+              icon={SlidersHorizontal}
+              label="Structured"
+              data-testid="cron-mode-structured"
+              aria-pressed={formMode === 'structured'}
+              onClick={() => {
+                setFormMode('structured')
+                setError(null)
+              }}
+            />
+            <IconButton
+              className={`pw-secondary-button ${formMode === 'json' ? 'is-selected' : ''}`}
+              icon={Braces}
+              label="JSON"
+              data-testid="cron-mode-json"
+              aria-pressed={formMode === 'json'}
+              onClick={() => {
+                setJsonValue(structuredPreview)
+                setFormMode('json')
+                setError(null)
+              }}
+            />
+            <IconButton
+              className="pw-secondary-button"
+              icon={X}
+              label="Close cron dialog"
+              onClick={onClose}
+            />
           </div>
         </header>
 
@@ -410,32 +427,46 @@ export function CronConfigDialog(props: CronConfigDialogProps) {
           <div className="pw-modal-actions">
             {isEdit && (
               <>
-                <button className="pw-secondary-button" type="button" onClick={async () => {
-                  if (!initialJob) {
-                    return
-                  }
-                  setPending(true)
-                  setError(null)
-                  try {
-                    await toggleCronDefinition(initialJob.id, !initialJob.enabled)
-                    await onSaved()
-                    onClose()
-                  } catch (nextError) {
-                    setError(nextError instanceof Error ? nextError.message : 'Failed to toggle cron job')
-                  } finally {
-                    setPending(false)
-                  }
-                }} disabled={pending}>
-                  {initialJob.enabled ? 'Disable' : 'Enable'}
-                </button>
-                <button className="pw-secondary-button" type="button" onClick={() => void handleDelete()} disabled={pending}>
-                  Delete
-                </button>
+                <IconButton
+                  className="pw-secondary-button"
+                  icon={initialJob?.enabled ? ToggleLeft : ToggleRight}
+                  label={initialJob?.enabled ? 'Disable' : 'Enable'}
+                  onClick={async () => {
+                    if (!initialJob) {
+                      return
+                    }
+                    setPending(true)
+                    setError(null)
+                    try {
+                      await toggleCronDefinition(initialJob.id, !initialJob.enabled)
+                      await onSaved()
+                      onClose()
+                    } catch (nextError) {
+                      setError(nextError instanceof Error ? nextError.message : 'Failed to toggle cron job')
+                    } finally {
+                      setPending(false)
+                    }
+                  }}
+                  disabled={pending}
+                />
+                <IconButton
+                  className="pw-secondary-button"
+                  icon={Trash2}
+                  label="Delete"
+                  onClick={() => void handleDelete()}
+                  disabled={pending}
+                />
               </>
             )}
-            <button className="pw-primary-button" type="button" data-testid="cron-save-button" onClick={() => void handleSubmit()} disabled={pending}>
-              {pending ? 'Saving...' : isEdit ? 'Save changes' : 'Create cron'}
-            </button>
+            <IconButton
+              className="pw-primary-button"
+              icon={Save}
+              label={pending ? 'Saving cron job' : isEdit ? 'Save changes' : 'Create cron'}
+              data-testid="cron-save-button"
+              onClick={() => void handleSubmit()}
+              disabled={pending}
+              spin={pending}
+            />
           </div>
         </footer>
       </div>

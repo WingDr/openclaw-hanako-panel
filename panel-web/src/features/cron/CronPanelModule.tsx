@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import { Clock3, Pencil, Play, RefreshCw, ToggleLeft, ToggleRight } from 'lucide-react'
 import {
   fetchCronJobs,
   formatDateTime,
@@ -6,6 +7,7 @@ import {
   toggleCronDefinition,
   type CronJobSummary,
 } from '../../api/client'
+import { IconButton } from '../../components/IconButton'
 import { CronConfigDialog } from './CronConfigDialog'
 
 type CronPanelModuleProps = {
@@ -60,20 +62,23 @@ export function CronPanelModule(props: CronPanelModuleProps) {
           <h2>Scheduled runs</h2>
         </div>
         <div className="pw-right-rail-actions">
-          <button className="pw-secondary-button" type="button" onClick={() => void refreshJobs()}>
-            Refresh
-          </button>
-          <button
+          <IconButton
+            className="pw-secondary-button"
+            icon={RefreshCw}
+            label="Refresh cron jobs"
+            onClick={() => void refreshJobs()}
+            spin={loading}
+          />
+          <IconButton
             className="pw-primary-button"
-            type="button"
+            icon={Clock3}
+            label="New cron"
             data-testid="cron-new-button"
             onClick={() => {
               setEditingJob(null)
               setDialogOpen(true)
             }}
-          >
-            New cron
-          </button>
+          />
         </div>
       </header>
 
@@ -110,9 +115,10 @@ export function CronPanelModule(props: CronPanelModuleProps) {
                   <span>{job.lastStatus || '--'}</span>
                 </div>
                 <div className="pw-right-rail-actions">
-                  <button
+                  <IconButton
                     className="pw-secondary-button"
-                    type="button"
+                    icon={Play}
+                    label="Run now"
                     onClick={async () => {
                       try {
                         await runCronDefinition(job.id)
@@ -121,12 +127,11 @@ export function CronPanelModule(props: CronPanelModuleProps) {
                         setError(nextError instanceof Error ? nextError.message : 'Failed to run cron job')
                       }
                     }}
-                  >
-                    Run now
-                  </button>
-                  <button
+                  />
+                  <IconButton
                     className="pw-secondary-button"
-                    type="button"
+                    icon={job.enabled ? ToggleLeft : ToggleRight}
+                    label={job.enabled ? 'Disable' : 'Enable'}
                     onClick={async () => {
                       try {
                         await toggleCronDefinition(job.id, !job.enabled)
@@ -135,19 +140,16 @@ export function CronPanelModule(props: CronPanelModuleProps) {
                         setError(nextError instanceof Error ? nextError.message : 'Failed to toggle cron job')
                       }
                     }}
-                  >
-                    {job.enabled ? 'Disable' : 'Enable'}
-                  </button>
-                  <button
+                  />
+                  <IconButton
                     className="pw-primary-button"
-                    type="button"
+                    icon={Pencil}
+                    label="Edit"
                     onClick={() => {
                       setEditingJob(job)
                       setDialogOpen(true)
                     }}
-                  >
-                    Edit
-                  </button>
+                  />
                 </div>
               </article>
             ))}
